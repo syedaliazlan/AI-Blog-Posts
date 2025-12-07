@@ -19,6 +19,11 @@ $is_configured = Ai_Blog_Posts_Settings::is_configured();
 $is_verified = Ai_Blog_Posts_Settings::is_verified();
 $models = Ai_Blog_Posts_Settings::get_models();
 $current_model = Ai_Blog_Posts_Settings::get( 'model' );
+
+// Get pre-filled values from URL
+$prefill_topic = isset( $_GET['topic'] ) ? sanitize_text_field( wp_unslash( $_GET['topic'] ) ) : '';
+$prefill_keywords = isset( $_GET['keywords'] ) ? sanitize_text_field( wp_unslash( $_GET['keywords'] ) ) : '';
+$prefill_topic_id = isset( $_GET['topic_id'] ) ? absint( $_GET['topic_id'] ) : 0;
 ?>
 
 <div class="wrap ai-blog-posts-wrap">
@@ -42,6 +47,9 @@ $current_model = Ai_Blog_Posts_Settings::get( 'model' );
 		<div class="generate-form-container">
 			<form id="generate-post-form" class="ai-blog-posts-form" <?php echo ! $is_verified ? 'disabled' : ''; ?>>
 				<?php wp_nonce_field( 'ai_blog_posts_nonce', 'ai_blog_posts_nonce' ); ?>
+				<?php if ( $prefill_topic_id ) : ?>
+					<input type="hidden" id="queue_topic_id" name="queue_topic_id" value="<?php echo esc_attr( $prefill_topic_id ); ?>">
+				<?php endif; ?>
 
 				<div class="form-section">
 					<h2><?php esc_html_e( 'Topic & Content', 'ai-blog-posts' ); ?></h2>
@@ -53,6 +61,7 @@ $current_model = Ai_Blog_Posts_Settings::get( 'model' );
 							   name="topic" 
 							   class="large-text" 
 							   placeholder="<?php esc_attr_e( 'e.g., 10 Tips for Better SEO in 2024', 'ai-blog-posts' ); ?>"
+							   value="<?php echo esc_attr( $prefill_topic ); ?>"
 							   required
 							   <?php echo ! $is_verified ? 'disabled' : ''; ?>>
 						<p class="description"><?php esc_html_e( 'Enter the topic or title for your blog post.', 'ai-blog-posts' ); ?></p>
@@ -65,6 +74,7 @@ $current_model = Ai_Blog_Posts_Settings::get( 'model' );
 							   name="keywords" 
 							   class="large-text" 
 							   placeholder="<?php esc_attr_e( 'e.g., SEO tips, search ranking, Google optimization', 'ai-blog-posts' ); ?>"
+							   value="<?php echo esc_attr( $prefill_keywords ); ?>"
 							   <?php echo ! $is_verified ? 'disabled' : ''; ?>>
 						<p class="description"><?php esc_html_e( 'Comma-separated keywords to focus on (optional).', 'ai-blog-posts' ); ?></p>
 					</div>

@@ -1110,7 +1110,25 @@
 }
 
 .logs-actions {
+	display: flex;
+	gap: 12px;
 	margin-bottom: 16px;
+}
+
+.logs-actions .button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.logs-actions .button-link-delete {
+	color: var(--aibp-error);
+}
+
+.logs-actions .button-link-delete:hover {
+	color: #fff;
+	background: var(--aibp-error);
+	border-color: var(--aibp-error);
 }
 
 /* ==========================================================================
@@ -1189,6 +1207,125 @@
 .loading-spinner .spinner {
 	float: none;
 	margin: 0 auto 16px;
+}
+
+/* ==========================================================================
+   Trending Topics List
+   ========================================================================== */
+
+.topics-source-note {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 16px 0;
+	padding: 12px 16px;
+	background: var(--aibp-gray-50);
+	border-radius: var(--aibp-radius);
+	font-size: 13px;
+	color: var(--aibp-gray-600);
+}
+
+.topics-source-note .dashicons {
+	font-size: 18px;
+	width: 18px;
+	height: 18px;
+	color: var(--aibp-primary);
+}
+
+.trending-topics-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-height: 350px;
+	overflow-y: auto;
+	padding-right: 8px;
+}
+
+.trending-item {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px;
+	background: #fff;
+	border: 1px solid var(--aibp-gray-200);
+	border-radius: var(--aibp-radius);
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.trending-item:hover {
+	border-color: var(--aibp-primary);
+	background: var(--aibp-primary-light);
+}
+
+.trending-item input[type="checkbox"] {
+	flex-shrink: 0;
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	cursor: pointer;
+}
+
+.trending-item .topic-title {
+	flex: 1;
+	font-size: 14px;
+	color: var(--aibp-gray-800);
+	line-height: 1.4;
+}
+
+.trending-item .topic-traffic {
+	flex-shrink: 0;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 4px 8px;
+	background: var(--aibp-success-light);
+	color: var(--aibp-success);
+	border-radius: 4px;
+	text-transform: uppercase;
+}
+
+.select-hint {
+	margin: 12px 0 0 0;
+	color: var(--aibp-gray-500);
+}
+
+.select-hint small {
+	font-size: 12px;
+}
+
+.topics-refresh {
+	margin: 8px 0 12px 0;
+}
+
+.topics-refresh .button {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.topics-refresh .dashicons {
+	font-size: 14px;
+	width: 14px;
+	height: 14px;
+}
+
+.no-topics-message {
+	text-align: center;
+	padding: 30px 20px;
+	color: var(--aibp-gray-500);
+}
+
+.no-topics-message .dashicons {
+	font-size: 36px;
+	width: 36px;
+	height: 36px;
+	color: var(--aibp-warning);
+	margin-bottom: 12px;
+}
+
+.no-topics-message p {
+	margin: 0;
+	font-size: 14px;
 }
 
 /* ==========================================================================
@@ -1493,4 +1630,80 @@
 
 .dashicons.spin {
 	animation: spin 1s linear infinite;
+}
+
+/* ==========================================================================
+   Topics Table Bulk Actions
+   ========================================================================== */
+
+.topics-table tr.generating {
+	background-color: var(--aibp-primary-light) !important;
+	animation: pulse 1.5s infinite;
+}
+
+.topics-table tr.generated {
+	background-color: var(--aibp-success-light) !important;
+}
+
+.topics-table tr.generation-failed {
+	background-color: var(--aibp-error-light) !important;
+}
+
+@keyframes pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.7; }
+}
+
+.actions-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.actions-right select {
+	min-width: 150px;
+}
+
+/* Topic table checkbox styling */
+.topics-table .topic-checkbox {
+	width: 18px;
+	height: 18px;
+	margin: 0;
+	cursor: pointer;
+}
+
+.topics-table thead th:first-child,
+.topics-table tbody td:first-child {
+	width: 30px;
+	padding-right: 0;
+}
+
+/* Status badges in table */
+.topics-table .status-badge {
+	display: inline-block;
+	padding: 4px 10px;
+	border-radius: 4px;
+	font-size: 12px;
+	font-weight: 500;
+	text-transform: capitalize;
+}
+
+.topics-table .status-pending {
+	background: var(--aibp-warning-light);
+	color: var(--aibp-warning);
+}
+
+.topics-table .status-completed {
+	background: var(--aibp-success-light);
+	color: var(--aibp-success);
+}
+
+.topics-table .status-failed {
+	background: var(--aibp-error-light);
+	color: var(--aibp-error);
+}
+
+.topics-table .status-processing {
+	background: var(--aibp-primary-light);
+	color: var(--aibp-primary);
 }

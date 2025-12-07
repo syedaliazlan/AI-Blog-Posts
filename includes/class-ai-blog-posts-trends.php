@@ -29,12 +29,12 @@ class Ai_Blog_Posts_Trends {
 	private const TRENDS_API_URL = 'https://trends.google.com/trends/api/dailytrends';
 
 	/**
-	 * Cache expiration in seconds.
+	 * Cache expiration in seconds (1 hour).
 	 *
 	 * @since    1.0.0
 	 * @var      int
 	 */
-	private const CACHE_EXPIRATION = 6 * HOUR_IN_SECONDS;
+	private const CACHE_EXPIRATION = HOUR_IN_SECONDS;
 
 	/**
 	 * Fetch trending topics.
@@ -53,30 +53,185 @@ class Ai_Blog_Posts_Trends {
 		}
 
 		$country = Ai_Blog_Posts_Settings::get( 'trending_country' );
+		$topics = null;
 		
 		// Try Google Trends JSON API first
-		$topics = $this->fetch_from_google_trends( $country );
+		$google_result = $this->fetch_from_google_trends( $country );
+		if ( ! is_wp_error( $google_result ) && ! empty( $google_result ) ) {
+			$topics = $google_result;
+		}
 		
-		// If Google Trends fails, use AI to generate relevant topics
-		if ( is_wp_error( $topics ) || empty( $topics ) ) {
-			$topics = $this->generate_trending_with_ai( $country );
+		// If Google Trends fails, try AI to generate relevant topics
+		if ( empty( $topics ) && Ai_Blog_Posts_Settings::is_verified() ) {
+			$ai_result = $this->generate_trending_with_ai( $country );
+			if ( ! is_wp_error( $ai_result ) && ! empty( $ai_result ) ) {
+				$topics = $ai_result;
+			}
 		}
 
-		if ( is_wp_error( $topics ) ) {
-			return $topics;
-		}
-
+		// Ultimate fallback: use curated evergreen topics
 		if ( empty( $topics ) ) {
-			return new WP_Error(
-				'no_topics',
-				__( 'No trending topics could be fetched. Please try again later.', 'ai-blog-posts' )
-			);
+			$topics = $this->get_fallback_topics( $country );
 		}
 
 		// Cache the results
 		set_transient( 'ai_blog_posts_trending_topics', $topics, self::CACHE_EXPIRATION );
 
 		return $topics;
+	}
+
+	/**
+	 * Get fallback curated topics when external APIs fail.
+	 *
+	 * @since    1.0.0
+	 * @param    string $country    Country code.
+	 * @return   array              Curated topics.
+	 */
+	private function get_fallback_topics( $country ) {
+		// Get user's configured categories for context
+		$categories = Ai_Blog_Posts_Settings::get( 'categories' );
+		$category_names = array();
+		
+		if ( ! empty( $categories ) ) {
+			foreach ( $categories as $cat_id ) {
+				$cat = get_category( $cat_id );
+				if ( $cat ) {
+					$category_names[] = strtolower( $cat->name );
+				}
+			}
+		}
+
+		// Curated evergreen topics by category
+		$topic_bank = array(
+			'technology' => array(
+				'AI Tools That Will Transform Your Workflow in 2024',
+				'Cybersecurity Best Practices for Small Businesses',
+				'How to Choose the Right Cloud Service Provider',
+				'The Future of Remote Work Technology',
+				'Automation Tools Every Business Should Consider',
+			),
+			'business' => array(
+				'Strategies for Sustainable Business Growth',
+				'How to Build a Strong Company Culture Remotely',
+				'Financial Planning Tips for Entrepreneurs',
+				'Customer Retention Strategies That Actually Work',
+				'How to Scale Your Business Without Losing Quality',
+			),
+			'marketing' => array(
+				'Content Marketing Trends You Need to Know',
+				'How to Create a Social Media Strategy That Converts',
+				'Email Marketing Best Practices for Higher Open Rates',
+				'SEO Strategies for Small Businesses',
+				'Building Brand Authority Through Thought Leadership',
+			),
+			'health' => array(
+				'Mental Health Tips for a Balanced Life',
+				'How to Build Sustainable Healthy Habits',
+				'The Science of Better Sleep',
+				'Nutrition Myths You Should Stop Believing',
+				'Stress Management Techniques for Busy Professionals',
+			),
+			'lifestyle' => array(
+				'Minimalism: How to Declutter Your Life',
+				'Work-Life Balance Strategies That Actually Work',
+				'How to Build Better Daily Routines',
+				'Travel Tips for the Modern Explorer',
+				'Sustainable Living: Small Changes Big Impact',
+			),
+			'finance' => array(
+				'Investment Strategies for Beginners',
+				'How to Build an Emergency Fund',
+				'Understanding Cryptocurrency for Beginners',
+				'Tax Planning Tips for Small Business Owners',
+				'Retirement Planning: Starting in Your 30s vs 40s',
+			),
+			'education' => array(
+				'Online Learning Platforms: A Comprehensive Guide',
+				'How to Develop a Growth Mindset',
+				'The Most In-Demand Skills for the Modern Workforce',
+				'Effective Study Techniques Backed by Science',
+				'How to Choose the Right Online Course',
+			),
+			'general' => array(
+				'Productivity Hacks for Getting More Done',
+				'How to Set and Achieve Your Goals',
+				'Building Better Habits: A Step-by-Step Guide',
+				'Time Management Strategies for Busy People',
+				'How to Stay Motivated When Working on Long Projects',
+				'The Art of Effective Communication',
+				'Problem-Solving Techniques for Any Challenge',
+				'How to Network Effectively in the Digital Age',
+				'Personal Branding Tips for Professionals',
+				'Leadership Lessons for Emerging Managers',
+			),
+		);
+
+		// Build topics array
+		$topics = array();
+		$added = array();
+
+		// First, add topics matching user's categories
+		foreach ( $category_names as $cat_name ) {
+			foreach ( $topic_bank as $category => $cat_topics ) {
+				if ( strpos( $cat_name, $category ) !== false || strpos( $category, $cat_name ) !== false ) {
+					foreach ( $cat_topics as $topic ) {
+						if ( ! in_array( $topic, $added, true ) ) {
+							$topics[] = array(
+								'title'   => $topic,
+								'traffic' => '10K+',
+								'link'    => '',
+								'source'  => 'curated',
+							);
+							$added[] = $topic;
+						}
+					}
+				}
+			}
+		}
+
+		// Fill remaining with general topics
+		foreach ( $topic_bank['general'] as $topic ) {
+			if ( count( $topics ) >= 15 ) {
+				break;
+			}
+			if ( ! in_array( $topic, $added, true ) ) {
+				$topics[] = array(
+					'title'   => $topic,
+					'traffic' => '10K+',
+					'link'    => '',
+					'source'  => 'curated',
+				);
+				$added[] = $topic;
+			}
+		}
+
+		// Add some from other categories if we still need more
+		if ( count( $topics ) < 10 ) {
+			foreach ( $topic_bank as $category => $cat_topics ) {
+				if ( 'general' === $category ) {
+					continue;
+				}
+				foreach ( $cat_topics as $topic ) {
+					if ( count( $topics ) >= 15 ) {
+						break 2;
+					}
+					if ( ! in_array( $topic, $added, true ) ) {
+						$topics[] = array(
+							'title'   => $topic,
+							'traffic' => '5K+',
+							'link'    => '',
+							'source'  => 'curated',
+						);
+						$added[] = $topic;
+					}
+				}
+			}
+		}
+
+		// Shuffle to add variety
+		shuffle( $topics );
+
+		return array_slice( $topics, 0, 12 );
 	}
 
 	/**

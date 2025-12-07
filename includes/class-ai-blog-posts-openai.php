@@ -389,15 +389,28 @@ class Ai_Blog_Posts_OpenAI {
 		// Retry logic
 		$attempts = 0;
 		$last_error = null;
+		$last_http_code = null;
+		$last_response_body = null;
 
 		while ( $attempts < self::MAX_RETRIES ) {
 			$attempts++;
+			
+			// Log attempt for debugging
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'AI Blog Posts: API request attempt %d to %s', $attempts, $endpoint ) );
+			}
+			
 			$response = wp_remote_request( $url, $args );
 
 			if ( is_wp_error( $response ) ) {
 				$last_error = $response;
 				
-				// Don't retry on connection errors
+				// Log the error
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+					error_log( 'AI Blog Posts: WP_Error - ' . $response->get_error_message() );
+				}
+				
+				// Don't retry on connection errors - break but keep the error
 				if ( strpos( $response->get_error_message(), 'cURL' ) !== false ) {
 					break;
 				}
@@ -414,14 +427,36 @@ class Ai_Blog_Posts_OpenAI {
 			$data = json_decode( $body, true );
 
 			$this->last_response = $data;
+			$last_http_code = $code;
+			$last_response_body = $body;
+
+			// Log response for debugging
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'AI Blog Posts: HTTP %d response from %s', $code, $endpoint ) );
+				if ( $code >= 400 ) {
+					error_log( 'AI Blog Posts: Error response - ' . substr( $body, 0, 500 ) );
+				}
+			}
 
 			// Success
 			if ( $code >= 200 && $code < 300 ) {
 				return $data;
 			}
 
-			// Rate limited - retry with backoff
+			// Rate limited or quota exceeded
 			if ( 429 === $code ) {
+				// Check if it's a quota issue (don't retry those)
+				$error_type = $data['error']['type'] ?? '';
+				$error_code = $data['error']['code'] ?? '';
+				
+				if ( 'insufficient_quota' === $error_code || 'insufficient_quota' === $error_type ) {
+					return new WP_Error(
+						'quota_exceeded',
+						__( 'Your OpenAI API quota has been exceeded. Please add credits to your OpenAI account at https://platform.openai.com/account/billing', 'ai-blog-posts' )
+					);
+				}
+				
+				// Regular rate limiting - retry with backoff
 				$retry_after = wp_remote_retrieve_header( $response, 'retry-after' );
 				$wait = $retry_after ? (int) $retry_after : pow( 2, $attempts );
 				
@@ -433,27 +468,64 @@ class Ai_Blog_Posts_OpenAI {
 
 			// Server error - retry
 			if ( $code >= 500 ) {
+				$last_error = new WP_Error( 'server_error', sprintf( __( 'OpenAI server error (HTTP %d)', 'ai-blog-posts' ), $code ) );
 				if ( $attempts < self::MAX_RETRIES ) {
 					sleep( pow( 2, $attempts ) );
 				}
 				continue;
 			}
 
-			// Client error - don't retry
+			// Client error - don't retry, return specific error message
 			$error_message = $data['error']['message'] ?? __( 'API request failed.', 'ai-blog-posts' );
 			$this->last_error = $error_message;
+			
+			// Check for specific error types
+			if ( 401 === $code ) {
+				return new WP_Error( 'invalid_api_key', __( 'Invalid API key. Please check your API key in Settings.', 'ai-blog-posts' ) );
+			}
+			if ( 403 === $code ) {
+				return new WP_Error( 'access_denied', __( 'Access denied. Your API key may not have permission for this model.', 'ai-blog-posts' ) );
+			}
+			if ( 404 === $code ) {
+				return new WP_Error( 'model_not_found', __( 'The selected model was not found. Please choose a different model.', 'ai-blog-posts' ) );
+			}
 			
 			return new WP_Error( 'api_error', $error_message, array( 'status' => $code ) );
 		}
 
 		// All retries exhausted
 		if ( $last_error ) {
+			$error_msg = $last_error->get_error_message();
+			// Make error more helpful
+			if ( strpos( $error_msg, 'cURL error 6' ) !== false ) {
+				return new WP_Error( 'connection_error', __( 'Cannot connect to OpenAI. Please check your internet connection or server DNS settings.', 'ai-blog-posts' ) );
+			}
+			if ( strpos( $error_msg, 'cURL error 28' ) !== false ) {
+				return new WP_Error( 'timeout_error', __( 'Connection to OpenAI timed out. The servers may be busy, please try again.', 'ai-blog-posts' ) );
+			}
+			if ( strpos( $error_msg, 'cURL error 7' ) !== false ) {
+				return new WP_Error( 'connection_refused', __( 'Connection to OpenAI was refused. Your server firewall may be blocking outbound HTTPS requests.', 'ai-blog-posts' ) );
+			}
+			if ( strpos( $error_msg, 'cURL error 35' ) !== false || strpos( $error_msg, 'cURL error 60' ) !== false ) {
+				return new WP_Error( 'ssl_error', __( 'SSL certificate error connecting to OpenAI. Please contact your hosting provider.', 'ai-blog-posts' ) );
+			}
+			if ( strpos( $error_msg, 'cURL' ) !== false ) {
+				return new WP_Error( 'curl_error', sprintf( __( 'Connection error: %s', 'ai-blog-posts' ), $error_msg ) );
+			}
 			return $last_error;
+		}
+
+		// No specific error - provide HTTP code if available
+		if ( $last_http_code ) {
+			return new WP_Error(
+				'http_error',
+				sprintf( __( 'OpenAI returned HTTP %d. Please try again or contact support.', 'ai-blog-posts' ), $last_http_code )
+			);
 		}
 
 		return new WP_Error(
 			'max_retries',
-			__( 'Maximum retry attempts reached.', 'ai-blog-posts' )
+			__( 'API request failed after multiple attempts. Please check the debug log for details.', 'ai-blog-posts' )
 		);
 	}
 

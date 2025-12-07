@@ -219,9 +219,13 @@ class Ai_Blog_Posts {
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_generate_post', $plugin_admin, 'ajax_generate_post' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_add_topic', $plugin_admin, 'ajax_add_topic' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_delete_topic', $plugin_admin, 'ajax_delete_topic' );
+		$this->loader->add_action( 'wp_ajax_ai_blog_posts_bulk_delete_topics', $plugin_admin, 'ajax_bulk_delete_topics' );
+		$this->loader->add_action( 'wp_ajax_ai_blog_posts_generate_from_queue', $plugin_admin, 'ajax_generate_from_queue' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_get_logs', $plugin_admin, 'ajax_get_logs' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_analyze_website', $plugin_admin, 'ajax_analyze_website' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_fetch_trending', $plugin_admin, 'ajax_fetch_trending' );
+		$this->loader->add_action( 'wp_ajax_ai_blog_posts_export_logs', $plugin_admin, 'ajax_export_logs' );
+		$this->loader->add_action( 'wp_ajax_ai_blog_posts_clear_logs', $plugin_admin, 'ajax_clear_logs' );
 
 	}
 

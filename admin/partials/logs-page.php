@@ -101,11 +101,15 @@ $total_pages = ceil( $total_logs / $per_page );
 			</div>
 		</div>
 
-		<!-- Export -->
+		<!-- Actions -->
 		<div class="logs-actions">
 			<button type="button" id="export-csv" class="button">
 				<span class="dashicons dashicons-download"></span>
 				<?php esc_html_e( 'Export to CSV', 'ai-blog-posts' ); ?>
+			</button>
+			<button type="button" id="clear-logs" class="button button-link-delete">
+				<span class="dashicons dashicons-trash"></span>
+				<?php esc_html_e( 'Clear All Logs', 'ai-blog-posts' ); ?>
 			</button>
 		</div>
 

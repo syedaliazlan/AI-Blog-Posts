@@ -151,9 +151,9 @@ $status_counts = array(
 		<table class="wp-list-table widefat fixed striped topics-table">
 			<thead>
 				<tr>
-					<td class="manage-column column-cb check-column">
-						<input type="checkbox" id="select-all-topics">
-					</td>
+					<th class="manage-column column-cb check-column">
+						<input type="checkbox" id="select-all-topics" class="topic-checkbox">
+					</th>
 					<th class="manage-column column-topic"><?php esc_html_e( 'Topic', 'ai-blog-posts' ); ?></th>
 					<th class="manage-column column-keywords"><?php esc_html_e( 'Keywords', 'ai-blog-posts' ); ?></th>
 					<th class="manage-column column-category"><?php esc_html_e( 'Category', 'ai-blog-posts' ); ?></th>

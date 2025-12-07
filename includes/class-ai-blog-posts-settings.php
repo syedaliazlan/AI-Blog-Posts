@@ -47,9 +47,9 @@ class Ai_Blog_Posts_Settings {
 		),
 		'model' => array(
 			'type'      => 'string',
-			'default'   => 'gpt-4o-mini',
+			'default'   => 'gpt-5-mini',
 			'sanitize'  => 'sanitize_text_field',
-			'options'   => array( 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo' ),
+			'options'   => array( 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-pro', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo' ),
 		),
 		'image_enabled' => array(
 			'type'      => 'bool',
@@ -235,9 +235,14 @@ class Ai_Blog_Posts_Settings {
 			$value = Ai_Blog_Posts_Encryption::encrypt( $value );
 		}
 
-		// Handle boolean
+		// Handle boolean - properly convert string values
 		if ( 'bool' === $setting['type'] ) {
-			$value = (bool) $value;
+			if ( is_string( $value ) ) {
+				// Convert string "true"/"false"/"1"/"0" properly
+				$value = in_array( strtolower( $value ), array( 'true', '1', 'yes', 'on' ), true );
+			} else {
+				$value = (bool) $value;
+			}
 		}
 
 		// Handle integer with bounds
@@ -307,33 +312,88 @@ class Ai_Blog_Posts_Settings {
 	 */
 	public static function get_models() {
 		return array(
-			'gpt-4o' => array(
-				'name'             => 'GPT-4o',
-				'description'      => 'Most capable model, best for high-quality content',
-				'input_cost'       => 2.50,  // per 1M tokens
+			// GPT-5 Series (Latest)
+			'gpt-5.1' => array(
+				'name'             => 'GPT-5.1',
+				'description'      => 'Latest flagship - best for coding and agentic tasks',
+				'input_cost'       => 1.25,  // per 1M tokens
 				'output_cost'      => 10.00, // per 1M tokens
+				'context_window'   => 1000000,
+				'recommended'      => true,
+			),
+			'gpt-5' => array(
+				'name'             => 'GPT-5',
+				'description'      => 'Main GPT-5 model - excellent for all tasks',
+				'input_cost'       => 1.25,
+				'output_cost'      => 10.00,
+				'context_window'   => 1000000,
+				'recommended'      => true,
+			),
+			'gpt-5-mini' => array(
+				'name'             => 'GPT-5 Mini',
+				'description'      => 'Fast & affordable - great for most content',
+				'input_cost'       => 0.25,
+				'output_cost'      => 2.00,
+				'context_window'   => 1000000,
+				'recommended'      => true,
+			),
+			'gpt-5-nano' => array(
+				'name'             => 'GPT-5 Nano',
+				'description'      => 'Ultra-fast, cheapest - good for simple tasks',
+				'input_cost'       => 0.05,
+				'output_cost'      => 0.40,
+				'context_window'   => 1000000,
+				'recommended'      => false,
+			),
+			'gpt-5-pro' => array(
+				'name'             => 'GPT-5 Pro',
+				'description'      => 'Premium reasoning - best for complex analysis',
+				'input_cost'       => 15.00,
+				'output_cost'      => 120.00,
+				'context_window'   => 1000000,
+				'recommended'      => false,
+			),
+			// GPT-4.1 Series
+			'gpt-4.1' => array(
+				'name'             => 'GPT-4.1',
+				'description'      => 'Updated GPT-4 - excellent quality',
+				'input_cost'       => 2.00,
+				'output_cost'      => 8.00,
 				'context_window'   => 128000,
+				'recommended'      => false,
+			),
+			'gpt-4.1-mini' => array(
+				'name'             => 'GPT-4.1 Mini',
+				'description'      => 'Efficient GPT-4.1 - good balance',
+				'input_cost'       => 0.40,
+				'output_cost'      => 1.60,
+				'context_window'   => 128000,
+				'recommended'      => false,
+			),
+			// Legacy Models (still available)
+			'gpt-4o' => array(
+				'name'             => 'GPT-4o (Legacy)',
+				'description'      => 'Previous flagship - still excellent',
+				'input_cost'       => 2.50,
+				'output_cost'      => 10.00,
+				'context_window'   => 128000,
+				'recommended'      => false,
 			),
 			'gpt-4o-mini' => array(
-				'name'             => 'GPT-4o Mini',
-				'description'      => 'Fast and affordable, good balance of quality and cost',
+				'name'             => 'GPT-4o Mini (Legacy)',
+				'description'      => 'Previous best value model',
 				'input_cost'       => 0.15,
 				'output_cost'      => 0.60,
 				'context_window'   => 128000,
+				'recommended'      => false,
 			),
 			'gpt-4-turbo' => array(
-				'name'             => 'GPT-4 Turbo',
-				'description'      => 'Previous flagship model, excellent quality',
+				'name'             => 'GPT-4 Turbo (Legacy)',
+				'description'      => 'Older GPT-4 variant',
 				'input_cost'       => 10.00,
 				'output_cost'      => 30.00,
 				'context_window'   => 128000,
-			),
-			'gpt-3.5-turbo' => array(
-				'name'             => 'GPT-3.5 Turbo',
-				'description'      => 'Legacy model, fastest and cheapest',
-				'input_cost'       => 0.50,
-				'output_cost'      => 1.50,
-				'context_window'   => 16385,
+				'recommended'      => false,
 			),
 		);
 	}

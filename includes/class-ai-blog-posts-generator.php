@@ -95,6 +95,23 @@ class Ai_Blog_Posts_Generator {
 	public function generate_post( $topic, $options = array() ) {
 		$start_time = microtime( true );
 
+		// Check if API is configured
+		if ( ! Ai_Blog_Posts_Settings::is_configured() ) {
+			return new WP_Error( 
+				'api_not_configured', 
+				__( 'OpenAI API key is not configured. Please add your API key in Settings.', 'ai-blog-posts' ) 
+			);
+		}
+
+		// Verify API key is working
+		$api_key = Ai_Blog_Posts_Settings::get( 'api_key' );
+		if ( empty( $api_key ) ) {
+			return new WP_Error( 
+				'api_key_empty', 
+				__( 'API key could not be retrieved. Please re-enter your API key in Settings.', 'ai-blog-posts' ) 
+			);
+		}
+
 		// Reset token tracking
 		$this->token_usage = array(
 			'prompt_tokens'     => 0,
@@ -190,6 +207,12 @@ class Ai_Blog_Posts_Generator {
 			if ( ! is_wp_error( $image_result ) ) {
 				$image_cost = $image_result['cost_usd'] ?? 0;
 			}
+		}
+
+		// Step 9: Generate and set tags
+		$tags = $this->generate_tags( $topic, $options['keywords'], $humanized );
+		if ( ! empty( $tags ) ) {
+			wp_set_post_tags( $post_id, $tags, false );
 		}
 
 		// Add post meta
@@ -568,13 +591,177 @@ class Ai_Blog_Posts_Generator {
 	 * @return   string             Title.
 	 */
 	private function extract_title( $topic, $outline ) {
-		// Try to find a suggested title in the outline
-		if ( preg_match( '/title[:\s]+["\'"]?([^"\'\n]+)["\'"]?/i', $outline, $matches ) ) {
-			return trim( $matches[1] );
+		// Words that indicate a title label (not the actual title)
+		$title_labels = array( 'title', 'suggested title', 'title suggestion', 'blog title', 'post title', 'article title' );
+		
+		// Pattern 1: **Title:** Actual Title Here or **Suggested Title:** Actual Title
+		// Captures what comes AFTER the colon
+		if ( preg_match( '/\*\*(?:suggested\s+)?title(?:\s+suggestion)?[:\s]*\*\*[:\s]*["\'"]?([^"\'\n]+)["\'"]?/i', $outline, $matches ) ) {
+			$title = $this->clean_title( $matches[1] );
+			if ( $this->is_valid_title( $title, $title_labels ) ) {
+				return $title;
+			}
 		}
 
-		// Fall back to the topic
-		return ucwords( $topic );
+		// Pattern 2: Title: "Actual Title Here" (with quotes)
+		if ( preg_match( '/(?:suggested\s+)?title(?:\s+suggestion)?[:\s]+["\']([^"\']+)["\']/i', $outline, $matches ) ) {
+			$title = $this->clean_title( $matches[1] );
+			if ( $this->is_valid_title( $title, $title_labels ) ) {
+				return $title;
+			}
+		}
+
+		// Pattern 3: Title: Actual Title Here (without quotes, same line)
+		if ( preg_match( '/^(?:\*\*)?(?:suggested\s+)?title(?:\s+suggestion)?(?:\*\*)?[:\s]+(.+)$/mi', $outline, $matches ) ) {
+			$title = $this->clean_title( $matches[1] );
+			if ( $this->is_valid_title( $title, $title_labels ) ) {
+				return $title;
+			}
+		}
+
+		// Pattern 4: Title label on one line, actual title on next line (bold or plain)
+		if ( preg_match( '/(?:suggested\s+)?title(?:\s+suggestion)?[:\s]*\n+\s*\*?\*?["\'"]?([^\n\*"\']+)["\'"]?\*?\*?/i', $outline, $matches ) ) {
+			$title = $this->clean_title( $matches[1] );
+			if ( $this->is_valid_title( $title, $title_labels ) ) {
+				return $title;
+			}
+		}
+
+		// Pattern 5: First bold text that looks like a title (not a section heading like "Introduction")
+		if ( preg_match_all( '/\*\*([^*\n]+)\*\*/m', $outline, $matches ) ) {
+			foreach ( $matches[1] as $match ) {
+				$title = $this->clean_title( $match );
+				// Skip common section headings and title labels
+				$skip_words = array_merge( $title_labels, array( 'introduction', 'conclusion', 'overview', 'summary', 'outline', 'section', 'chapter' ) );
+				if ( $this->is_valid_title( $title, $skip_words ) && strlen( $title ) > 15 ) {
+					return $title;
+				}
+			}
+		}
+
+		// Pattern 6: First H1 heading that's not a label
+		if ( preg_match( '/^#\s+([^#\n]+)/m', $outline, $matches ) ) {
+			$title = $this->clean_title( $matches[1] );
+			if ( $this->is_valid_title( $title, $title_labels ) ) {
+				return $title;
+			}
+		}
+
+		// Fall back to the topic (properly formatted)
+		return ucwords( strtolower( $topic ) );
+	}
+
+	/**
+	 * Clean up a title string.
+	 *
+	 * @param    string $title    Raw title.
+	 * @return   string           Cleaned title.
+	 */
+	private function clean_title( $title ) {
+		// Remove markdown formatting
+		$title = preg_replace( '/^\*\*|\*\*$/', '', $title );
+		$title = preg_replace( '/^#+\s*/', '', $title );
+		$title = preg_replace( '/^\*|\*$/', '', $title );
+		// Remove quotes and extra punctuation
+		$title = trim( $title, ':*#"\'\- ' );
+		// Remove "Title:" prefix if it somehow got included
+		$title = preg_replace( '/^(?:suggested\s+)?title(?:\s+suggestion)?[:\s]+/i', '', $title );
+		return trim( $title );
+	}
+
+	/**
+	 * Check if a title is valid (not just a label).
+	 *
+	 * @param    string $title        The title to check.
+	 * @param    array  $skip_words   Words that indicate this is a label, not a title.
+	 * @return   bool                 True if valid.
+	 */
+	private function is_valid_title( $title, $skip_words ) {
+		if ( empty( $title ) || strlen( $title ) < 5 ) {
+			return false;
+		}
+		
+		$title_lower = strtolower( trim( $title ) );
+		
+		// Check if the title is just a label word
+		foreach ( $skip_words as $word ) {
+			if ( $title_lower === $word || $title_lower === $word . ':' ) {
+				return false;
+			}
+		}
+		
+		return true;
+	}
+
+	/**
+	 * Generate tags for the post based on topic and content.
+	 *
+	 * @since    1.0.0
+	 * @param    string $topic      The topic.
+	 * @param    string $keywords   Keywords from the topic queue.
+	 * @param    string $content    The generated content.
+	 * @return   array              Array of tags.
+	 */
+	private function generate_tags( $topic, $keywords, $content ) {
+		$tags = array();
+
+		// Extract tags from provided keywords
+		if ( ! empty( $keywords ) ) {
+			$keyword_tags = array_map( 'trim', explode( ',', $keywords ) );
+			$tags = array_merge( $tags, $keyword_tags );
+		}
+
+		// Extract important words from topic
+		$topic_words = $this->extract_keywords_from_text( $topic );
+		$tags = array_merge( $tags, $topic_words );
+
+		// Extract key phrases from content (looking for bold text and headings)
+		if ( preg_match_all( '/<strong>([^<]+)<\/strong>/', $content, $matches ) ) {
+			foreach ( array_slice( $matches[1], 0, 5 ) as $match ) {
+				$clean = trim( wp_strip_all_tags( $match ) );
+				if ( strlen( $clean ) > 2 && strlen( $clean ) < 30 ) {
+					$tags[] = $clean;
+				}
+			}
+		}
+
+		// Clean and deduplicate tags
+		$tags = array_map( 'sanitize_text_field', $tags );
+		$tags = array_map( 'strtolower', $tags );
+		$tags = array_unique( $tags );
+		$tags = array_filter( $tags, function( $tag ) {
+			return strlen( $tag ) > 2 && strlen( $tag ) < 50;
+		} );
+
+		// Limit to 10 tags
+		return array_slice( array_values( $tags ), 0, 10 );
+	}
+
+	/**
+	 * Extract keywords from text (for tags).
+	 *
+	 * @since    1.0.0
+	 * @param    string $text    The text to extract from.
+	 * @return   array           Array of keywords.
+	 */
+	private function extract_keywords_from_text( $text ) {
+		// Common stop words to exclude
+		$stop_words = array(
+			'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+			'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+			'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+			'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
+			'it', 'its', 'you', 'your', 'we', 'our', 'they', 'their', 'how', 'what',
+			'when', 'where', 'why', 'which', 'who', 'whom',
+		);
+
+		// Clean and split text
+		$words = preg_split( '/[\s\-_:,;.!?]+/', strtolower( $text ) );
+		$words = array_filter( $words, function( $word ) use ( $stop_words ) {
+			return strlen( $word ) > 3 && ! in_array( $word, $stop_words, true );
+		} );
+
+		return array_unique( $words );
 	}
 
 	/**

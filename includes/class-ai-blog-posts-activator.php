@@ -41,10 +41,11 @@ class Ai_Blog_Posts_Activator {
 
 	/**
 	 * Create custom database tables for logs and topic queue.
+	 * Made public so it can be called to ensure tables exist.
 	 *
 	 * @since    1.0.0
 	 */
-	private static function create_database_tables() {
+	public static function create_database_tables() {
 		global $wpdb;
 
 		$charset_collate = $wpdb->get_charset_collate();

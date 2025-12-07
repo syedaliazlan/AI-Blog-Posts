@@ -23,6 +23,16 @@
 		},
 
 		/**
+		 * Escape HTML to prevent XSS
+		 */
+		escapeHtml: function(text) {
+			if (!text) return '';
+			const div = document.createElement('div');
+			div.textContent = text;
+			return div.innerHTML;
+		},
+
+		/**
 		 * Bind all event handlers
 		 */
 		bindEvents: function() {
@@ -47,7 +57,14 @@
 			$('.delete-topic').on('click', this.deleteTopic.bind(this));
 			$('.generate-topic').on('click', this.generateFromTopic.bind(this));
 			$('#fetch-trending').on('click', this.fetchTrending.bind(this));
+			$('#add-selected-trends').on('click', this.addSelectedTrends.bind(this));
 			$('#select-all-topics').on('change', this.toggleAllTopics);
+			$('#apply-bulk').on('click', this.applyBulkAction.bind(this));
+			
+			// Select all checkbox for topic table
+			$('.topics-table thead .topic-checkbox').on('change', function() {
+				$('.topics-table tbody .topic-checkbox').prop('checked', $(this).is(':checked'));
+			});
 
 			// Modals
 			$('#bulk-import').on('click', function() { $('#csv-import-modal').show(); });
@@ -56,8 +73,9 @@
 			// Website analysis (both quick and AI-powered buttons)
 			$('#analyze-website, #analyze-website-ai').on('click', this.analyzeWebsite.bind(this));
 
-			// Export CSV
+			// Export CSV and Clear Logs
 			$('#export-csv').on('click', this.exportLogs.bind(this));
+			$('#clear-logs').on('click', this.clearLogs.bind(this));
 		},
 
 		/**
@@ -191,7 +209,8 @@
 				if (!name) return;
 
 				if ($input.attr('type') === 'checkbox') {
-					settings[name] = $input.is(':checked');
+					// Send "1" or "0" for checkboxes - cleaner for PHP handling
+					settings[name] = $input.is(':checked') ? '1' : '0';
 				} else if ($input.attr('multiple')) {
 					settings[name] = $input.val() || [];
 				} else {
@@ -278,6 +297,12 @@
 				post_status: $('#post_status').val(),
 				generate_image: $('#generate_image').is(':checked')
 			};
+			
+			// Include queue topic ID if generating from queue
+			const queueTopicId = $('#queue_topic_id').val();
+			if (queueTopicId) {
+				data.queue_topic_id = queueTopicId;
+			}
 
 			$.ajax({
 				url: aiBlogPosts.ajaxUrl,
@@ -455,28 +480,211 @@
 		},
 
 		/**
-		 * Generate from topic
+		 * Generate from topic (uses AJAX to update queue status)
 		 */
 		generateFromTopic: function(e) {
 			e.preventDefault();
 			
-			const topicId = $(e.target).data('id');
-			const topicText = $(e.target).closest('tr').find('.column-topic strong').text();
+			const $link = $(e.target);
+			const $row = $link.closest('tr');
+			const topicId = $link.data('id');
+			const topicText = $row.find('.column-topic strong').text();
 			
-			if (confirm('Generate a post for "' + topicText + '"?')) {
-				window.location.href = 'admin.php?page=ai-blog-posts-generate&topic=' + encodeURIComponent(topicText);
+			if (!confirm('Generate a post for "' + topicText + '"?')) {
+				return;
 			}
+
+			// Show generating state
+			$link.text('Generating...').css('pointer-events', 'none');
+			$row.addClass('generating');
+
+			// Use AJAX to generate and update queue status
+			$.ajax({
+				url: aiBlogPosts.ajaxUrl,
+				type: 'POST',
+				timeout: 300000, // 5 minutes
+				data: {
+					action: 'ai_blog_posts_generate_from_queue',
+					nonce: aiBlogPosts.nonce,
+					topic_id: topicId
+				},
+				success: function(response) {
+					if (response.success) {
+						$row.removeClass('generating').addClass('generated');
+						$row.find('.column-status').html('<span class="status-badge status-completed">Completed</span>');
+						$link.closest('.generate').remove();
+						
+						// Show success message
+						alert('Post generated successfully!\n\nTitle: ' + (response.data.title || topicText) + '\n\nYou can edit it now.');
+						
+						// Optionally redirect to edit the post
+						if (response.data.edit_url && confirm('Do you want to edit the post now?')) {
+							window.location.href = response.data.edit_url;
+						} else {
+							location.reload();
+						}
+					} else {
+						$row.removeClass('generating').addClass('generation-failed');
+						$row.find('.column-status').html('<span class="status-badge status-failed">Failed</span>');
+						$link.text('Retry').css('pointer-events', 'auto');
+						alert('Error: ' + response.data.message);
+					}
+				},
+				error: function(xhr, status) {
+					$row.removeClass('generating').addClass('generation-failed');
+					$link.text('Retry').css('pointer-events', 'auto');
+					
+					let errorMsg = 'Connection error.';
+					if (status === 'timeout') {
+						errorMsg = 'Generation timed out. Please try again.';
+					}
+					alert(errorMsg);
+				}
+			});
+		},
+
+		/**
+		 * Apply bulk action to selected topics
+		 */
+		applyBulkAction: function(e) {
+			e.preventDefault();
+
+			const action = $('#bulk-action').val();
+			if (!action) {
+				alert('Please select a bulk action.');
+				return;
+			}
+
+			// Get selected topic IDs
+			const selectedIds = [];
+			$('.topics-table tbody .topic-checkbox:checked').each(function() {
+				selectedIds.push($(this).val());
+			});
+
+			if (selectedIds.length === 0) {
+				alert('Please select at least one topic.');
+				return;
+			}
+
+			if (action === 'delete') {
+				this.bulkDeleteTopics(selectedIds);
+			} else if (action === 'generate') {
+				this.bulkGenerateTopics(selectedIds);
+			}
+		},
+
+		/**
+		 * Bulk delete topics
+		 */
+		bulkDeleteTopics: function(ids) {
+			if (!confirm('Are you sure you want to delete ' + ids.length + ' topic(s)?')) {
+				return;
+			}
+
+			const $button = $('#apply-bulk');
+			$button.prop('disabled', true).text('Deleting...');
+
+			$.ajax({
+				url: aiBlogPosts.ajaxUrl,
+				type: 'POST',
+				data: {
+					action: 'ai_blog_posts_bulk_delete_topics',
+					nonce: aiBlogPosts.nonce,
+					topic_ids: ids
+				},
+				success: function(response) {
+					if (response.success) {
+						alert(response.data.message);
+						location.reload();
+					} else {
+						alert('Error: ' + response.data.message);
+					}
+				},
+				error: function() {
+					alert('Connection error.');
+				},
+				complete: function() {
+					$button.prop('disabled', false).text('Apply');
+				}
+			});
+		},
+
+		/**
+		 * Bulk generate topics (one at a time)
+		 */
+		bulkGenerateTopics: function(ids) {
+			if (!confirm('Generate posts for ' + ids.length + ' topic(s)? This may take several minutes.')) {
+				return;
+			}
+
+			const $button = $('#apply-bulk');
+			$button.prop('disabled', true);
+
+			let completed = 0;
+			let failed = 0;
+			let index = 0;
+
+			const generateNext = function() {
+				if (index >= ids.length) {
+					$button.prop('disabled', false).text('Apply');
+					alert('Generation complete! ' + completed + ' succeeded, ' + failed + ' failed.');
+					location.reload();
+					return;
+				}
+
+				const topicId = ids[index];
+				const $row = $('.topic-checkbox[value="' + topicId + '"]').closest('tr');
+				const topicText = $row.find('.column-topic strong').text();
+
+				$button.text('Generating ' + (index + 1) + '/' + ids.length + '...');
+				$row.addClass('generating');
+
+				$.ajax({
+					url: aiBlogPosts.ajaxUrl,
+					type: 'POST',
+					timeout: 300000, // 5 minutes timeout
+					data: {
+						action: 'ai_blog_posts_generate_from_queue',
+						nonce: aiBlogPosts.nonce,
+						topic_id: topicId
+					},
+					success: function(response) {
+						if (response.success) {
+							completed++;
+							$row.removeClass('generating').addClass('generated');
+						} else {
+							failed++;
+							$row.removeClass('generating').addClass('generation-failed');
+							console.error('Failed to generate:', topicText, response.data.message);
+						}
+					},
+					error: function() {
+						failed++;
+						$row.removeClass('generating').addClass('generation-failed');
+					},
+					complete: function() {
+						index++;
+						generateNext();
+					}
+				});
+			};
+
+			generateNext();
 		},
 
 		/**
 		 * Fetch trending topics
 		 */
-		fetchTrending: function(e) {
+		fetchTrending: function(e, forceRefresh) {
 			e.preventDefault();
 			
 			const $modal = $('#trending-modal');
 			const $loading = $('#trending-loading');
 			const $list = $('#trending-list');
+			const self = this;
+
+			// Determine if force refresh
+			const isForceRefresh = forceRefresh === true || $(e.target).attr('id') === 'refresh-trending';
 
 			$modal.show();
 			$loading.show();
@@ -485,36 +693,176 @@
 			$.ajax({
 				url: aiBlogPosts.ajaxUrl,
 				type: 'POST',
+				timeout: 30000,
 				data: {
 					action: 'ai_blog_posts_fetch_trending',
-					nonce: aiBlogPosts.nonce
+					nonce: aiBlogPosts.nonce,
+					force_refresh: isForceRefresh ? '1' : '0'
 				},
 				success: function(response) {
 					$loading.hide();
 
-					if (response.success && response.data.topics) {
-						let html = '<div class="trending-topics-list">';
+					if (response.success && response.data.topics && response.data.topics.length > 0) {
+						// Check source type for header message
+						const source = response.data.topics[0].source || 'trending';
+						let headerMsg = '';
+						let sourceLabel = '';
+						if (source === 'curated') {
+							headerMsg = '<p class="topics-source-note"><span class="dashicons dashicons-lightbulb"></span> Curated evergreen topics based on your categories.</p>';
+							sourceLabel = 'curated';
+						} else if (source === 'ai_generated') {
+							headerMsg = '<p class="topics-source-note"><span class="dashicons dashicons-superhero-alt"></span> AI-generated trending topics for your region.</p>';
+							sourceLabel = 'AI';
+						} else {
+							headerMsg = '<p class="topics-source-note"><span class="dashicons dashicons-chart-line"></span> Live trending topics from Google Trends.</p>';
+							sourceLabel = 'Google';
+						}
+						
+						// Add refresh button
+						headerMsg += '<p class="topics-refresh"><button type="button" id="refresh-trending" class="button button-small"><span class="dashicons dashicons-update"></span> Get Fresh Topics</button></p>';
+						
+						let html = headerMsg + '<div class="trending-topics-list">';
 						response.data.topics.forEach(function(topic, index) {
 							const title = topic.title || topic;
+							const traffic = topic.traffic || '';
+							
 							html += '<label class="trending-item">';
-							html += '<input type="checkbox" value="' + title + '" checked>';
-							html += '<span>' + title + '</span>';
-							if (topic.traffic) {
-								html += '<small>' + topic.traffic + ' searches</small>';
+							html += '<input type="checkbox" value="' + AIBlogPosts.escapeHtml(title) + '" checked>';
+							html += '<span class="topic-title">' + AIBlogPosts.escapeHtml(title) + '</span>';
+							if (traffic) {
+								html += '<span class="topic-traffic">' + AIBlogPosts.escapeHtml(traffic) + '</span>';
 							}
 							html += '</label>';
 						});
 						html += '</div>';
+						html += '<p class="select-hint"><small>Uncheck topics you don\'t want to add to your queue.</small></p>';
 						$list.html(html).show();
+						
+						// Bind refresh button
+						$('#refresh-trending').on('click', function(e) {
+							self.fetchTrending(e, true);
+						});
 					} else {
-						$list.html('<p>No trending topics found.</p>').show();
+						$list.html('<div class="no-topics-message"><span class="dashicons dashicons-warning"></span><p>No topics available. Please try again later.</p></div>').show();
 					}
 				},
-				error: function() {
+				error: function(xhr, status, error) {
 					$loading.hide();
-					$list.html('<p>Error fetching topics.</p>').show();
+					let errorMsg = 'Error fetching topics.';
+					if (status === 'timeout') {
+						errorMsg = 'Request timed out. Please try again.';
+					}
+					$list.html('<div class="no-topics-message"><span class="dashicons dashicons-warning"></span><p>' + errorMsg + '</p></div>').show();
 				}
 			});
+		},
+
+		/**
+		 * Add selected trending topics to queue
+		 */
+		addSelectedTrends: function(e) {
+			e.preventDefault();
+
+			const $button = $(e.target);
+			const $modal = $('#trending-modal');
+			const selectedTopics = [];
+
+			// Collect all checked topics
+			$('#trending-list input[type="checkbox"]:checked').each(function() {
+				selectedTopics.push($(this).val());
+			});
+
+			if (selectedTopics.length === 0) {
+				alert('Please select at least one topic to add.');
+				return;
+			}
+
+			$button.prop('disabled', true).text('Adding...');
+
+			// Add topics one by one
+			let addedCount = 0;
+			let failedCount = 0;
+			let processed = 0;
+
+			selectedTopics.forEach(function(topic) {
+				// Auto-generate keywords from topic title
+				const keywords = AIBlogPosts.extractKeywords(topic);
+				
+				$.ajax({
+					url: aiBlogPosts.ajaxUrl,
+					type: 'POST',
+					data: {
+						action: 'ai_blog_posts_add_topic',
+						nonce: aiBlogPosts.nonce,
+						topic: topic,
+						keywords: keywords,
+						category_id: 0,
+						priority: 0
+					},
+					success: function(response) {
+						if (response.success) {
+							addedCount++;
+						} else {
+							failedCount++;
+						}
+					},
+					error: function() {
+						failedCount++;
+					},
+					complete: function() {
+						processed++;
+						
+						// All done?
+						if (processed === selectedTopics.length) {
+							$button.prop('disabled', false).text('Add Selected');
+							$modal.hide();
+							
+							// Show result message
+							let msg = addedCount + ' topic(s) added to queue.';
+							if (failedCount > 0) {
+								msg += ' ' + failedCount + ' failed.';
+							}
+							alert(msg);
+							
+							// Reload page to show new topics
+							location.reload();
+						}
+					}
+				});
+			});
+		},
+
+		/**
+		 * Extract keywords from a topic title
+		 */
+		extractKeywords: function(topic) {
+			// Common words to filter out
+			const stopWords = [
+				'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+				'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
+				'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+				'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
+				'it', 'its', 'you', 'your', 'we', 'our', 'they', 'their', 'what', 'which',
+				'who', 'whom', 'how', 'when', 'where', 'why', 'all', 'each', 'every',
+				'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'not',
+				'only', 'same', 'so', 'than', 'too', 'very', 'just', 'also', 'now',
+				'here', 'there', 'about', 'into', 'through', 'during', 'before', 'after',
+				'above', 'below', 'between', 'under', 'again', 'further', 'then', 'once'
+			];
+			
+			// Clean and split the topic
+			const words = topic
+				.toLowerCase()
+				.replace(/[^\w\s]/g, ' ')  // Remove punctuation
+				.split(/\s+/)               // Split by whitespace
+				.filter(word => {
+					return word.length > 2 && !stopWords.includes(word);
+				});
+			
+			// Get unique keywords (max 5)
+			const uniqueKeywords = [...new Set(words)].slice(0, 5);
+			
+			return uniqueKeywords.join(', ');
 		},
 
 		/**
@@ -609,6 +957,43 @@
 			document.body.appendChild(form);
 			form.submit();
 			document.body.removeChild(form);
+		},
+
+		/**
+		 * Clear all logs
+		 */
+		clearLogs: function(e) {
+			e.preventDefault();
+			
+			if (!confirm('Are you sure you want to delete ALL generation logs? This action cannot be undone.')) {
+				return;
+			}
+
+			const $button = $('#clear-logs');
+			$button.prop('disabled', true).text('Clearing...');
+
+			$.ajax({
+				url: aiBlogPosts.ajaxUrl,
+				type: 'POST',
+				data: {
+					action: 'ai_blog_posts_clear_logs',
+					nonce: aiBlogPosts.nonce
+				},
+				success: function(response) {
+					if (response.success) {
+						alert(response.data.message);
+						location.reload();
+					} else {
+						alert('Error: ' + response.data.message);
+					}
+				},
+				error: function() {
+					alert('Connection error.');
+				},
+				complete: function() {
+					$button.prop('disabled', false).html('<span class="dashicons dashicons-trash"></span> Clear All Logs');
+				}
+			});
 		}
 	};
 

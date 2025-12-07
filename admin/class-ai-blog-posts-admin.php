@@ -50,6 +50,32 @@ class Ai_Blog_Posts_Admin {
 	public function __construct( $plugin_name, $version ) {
 		$this->plugin_name = $plugin_name;
 		$this->version = $version;
+		
+		// Ensure database tables exist
+		$this->maybe_create_tables();
+	}
+
+	/**
+	 * Ensure database tables exist (creates them if missing).
+	 *
+	 * @since    1.0.0
+	 */
+	private function maybe_create_tables() {
+		global $wpdb;
+		
+		$topics_table = $wpdb->prefix . 'ai_blog_posts_topics';
+		$logs_table = $wpdb->prefix . 'ai_blog_posts_logs';
+		
+		// Check if tables exist
+		$topics_exists = $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $topics_table ) ) === $topics_table;
+		$logs_exists = $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $logs_table ) ) === $logs_table;
+		
+		// Create tables if they don't exist
+		if ( ! $topics_exists || ! $logs_exists ) {
+			$plugin_dir = plugin_dir_path( dirname( __FILE__ ) );
+			require_once $plugin_dir . 'includes/class-ai-blog-posts-activator.php';
+			Ai_Blog_Posts_Activator::create_database_tables();
+		}
 	}
 
 	/**
@@ -273,6 +299,15 @@ class Ai_Blog_Posts_Admin {
 			wp_send_json_error( array( 'message' => __( 'No settings provided.', 'ai-blog-posts' ) ) );
 		}
 
+		// Boolean settings that need special handling
+		$boolean_settings = array(
+			'schedule_enabled',
+			'trending_enabled',
+			'image_enabled',
+			'seo_enabled',
+			'api_verified',
+		);
+
 		$saved = array();
 		foreach ( $settings as $key => $value ) {
 			// Skip API key if empty (don't overwrite existing)
@@ -280,8 +315,16 @@ class Ai_Blog_Posts_Admin {
 				continue;
 			}
 
-			// Handle arrays
-			if ( is_array( $value ) ) {
+			// Handle boolean values - convert string "true"/"false" to actual booleans
+			if ( in_array( $key, $boolean_settings, true ) ) {
+				// Handle various truthy/falsy values from JavaScript
+				if ( is_string( $value ) ) {
+					$value = in_array( strtolower( $value ), array( 'true', '1', 'yes', 'on' ), true );
+				} else {
+					$value = (bool) $value;
+				}
+			} elseif ( is_array( $value ) ) {
+				// Handle arrays
 				$value = array_map( 'sanitize_text_field', $value );
 			} else {
 				$value = sanitize_text_field( $value );
@@ -311,22 +354,70 @@ class Ai_Blog_Posts_Admin {
 		}
 
 		$topic = isset( $_POST['topic'] ) ? sanitize_text_field( wp_unslash( $_POST['topic'] ) ) : '';
+		$keywords = isset( $_POST['keywords'] ) ? sanitize_text_field( wp_unslash( $_POST['keywords'] ) ) : '';
 		$category_id = isset( $_POST['category_id'] ) ? absint( $_POST['category_id'] ) : 0;
 		$publish = isset( $_POST['publish'] ) && 'true' === $_POST['publish'];
+		$queue_topic_id = isset( $_POST['queue_topic_id'] ) ? absint( $_POST['queue_topic_id'] ) : 0;
 
 		if ( empty( $topic ) ) {
 			wp_send_json_error( array( 'message' => __( 'Topic is required.', 'ai-blog-posts' ) ) );
 		}
 
+		// If generating from queue, update status to processing
+		if ( $queue_topic_id ) {
+			global $wpdb;
+			$table = $wpdb->prefix . 'ai_blog_posts_topics';
+			$wpdb->update(
+				$table,
+				array( 'status' => 'processing' ),
+				array( 'id' => $queue_topic_id ),
+				array( '%s' ),
+				array( '%d' )
+			);
+		}
+
 		$generator = new Ai_Blog_Posts_Generator();
 		$result = $generator->generate_post( $topic, array(
+			'keywords'    => $keywords,
 			'category_id' => $category_id,
 			'publish'     => $publish,
-			'source'      => 'manual',
+			'source'      => $queue_topic_id ? 'queue' : 'manual',
 		) );
 
 		if ( is_wp_error( $result ) ) {
+			// If from queue, update status to failed
+			if ( $queue_topic_id ) {
+				global $wpdb;
+				$table = $wpdb->prefix . 'ai_blog_posts_topics';
+				$wpdb->update(
+					$table,
+					array(
+						'status'     => 'failed',
+						'last_error' => $result->get_error_message(),
+					),
+					array( 'id' => $queue_topic_id ),
+					array( '%s', '%s' ),
+					array( '%d' )
+				);
+			}
 			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		// If from queue, update status to completed
+		if ( $queue_topic_id ) {
+			global $wpdb;
+			$table = $wpdb->prefix . 'ai_blog_posts_topics';
+			$wpdb->update(
+				$table,
+				array(
+					'status'       => 'completed',
+					'post_id'      => $result['post_id'],
+					'processed_at' => current_time( 'mysql' ),
+				),
+				array( 'id' => $queue_topic_id ),
+				array( '%s', '%d', '%s' ),
+				array( '%d' )
+			);
 		}
 
 		wp_send_json_success( $result );
@@ -411,6 +502,133 @@ class Ai_Blog_Posts_Admin {
 	}
 
 	/**
+	 * AJAX handler: Bulk delete topics.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_bulk_delete_topics() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$topic_ids = isset( $_POST['topic_ids'] ) ? array_map( 'absint', (array) $_POST['topic_ids'] ) : array();
+
+		if ( empty( $topic_ids ) ) {
+			wp_send_json_error( array( 'message' => __( 'No topics selected.', 'ai-blog-posts' ) ) );
+		}
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_topics';
+
+		$placeholders = implode( ', ', array_fill( 0, count( $topic_ids ), '%d' ) );
+		$deleted = $wpdb->query(
+			$wpdb->prepare(
+				"DELETE FROM $table WHERE id IN ($placeholders)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$topic_ids
+			)
+		);
+
+		if ( false !== $deleted ) {
+			wp_send_json_success( array(
+				'message' => sprintf(
+					/* translators: %d: number of topics deleted */
+					__( '%d topic(s) deleted successfully.', 'ai-blog-posts' ),
+					$deleted
+				),
+			) );
+		} else {
+			wp_send_json_error( array( 'message' => __( 'Failed to delete topics.', 'ai-blog-posts' ) ) );
+		}
+	}
+
+	/**
+	 * AJAX handler: Generate post from queue.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_generate_from_queue() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$topic_id = isset( $_POST['topic_id'] ) ? absint( $_POST['topic_id'] ) : 0;
+
+		if ( ! $topic_id ) {
+			wp_send_json_error( array( 'message' => __( 'Invalid topic ID.', 'ai-blog-posts' ) ) );
+		}
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_topics';
+
+		// Get the topic
+		$topic = $wpdb->get_row(
+			$wpdb->prepare( "SELECT * FROM $table WHERE id = %d", $topic_id ) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+
+		if ( ! $topic ) {
+			wp_send_json_error( array( 'message' => __( 'Topic not found.', 'ai-blog-posts' ) ) );
+		}
+
+		// Update status to processing
+		$wpdb->update(
+			$table,
+			array( 'status' => 'processing' ),
+			array( 'id' => $topic_id ),
+			array( '%s' ),
+			array( '%d' )
+		);
+
+		// Generate the post
+		$generator = new Ai_Blog_Posts_Generator();
+		$result = $generator->generate_post( $topic->topic, array(
+			'keywords'    => $topic->keywords,
+			'category_id' => $topic->category_id,
+			'publish'     => false,
+			'source'      => 'queue',
+		) );
+
+		if ( is_wp_error( $result ) ) {
+			// Update topic status to failed
+			$wpdb->update(
+				$table,
+				array(
+					'status'     => 'failed',
+					'attempts'   => $topic->attempts + 1,
+					'last_error' => $result->get_error_message(),
+				),
+				array( 'id' => $topic_id ),
+				array( '%s', '%d', '%s' ),
+				array( '%d' )
+			);
+
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		// Update topic status to completed
+		$wpdb->update(
+			$table,
+			array(
+				'status'       => 'completed',
+				'post_id'      => $result['post_id'],
+				'processed_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $topic_id ),
+			array( '%s', '%d', '%s' ),
+			array( '%d' )
+		);
+
+		wp_send_json_success( array(
+			'message' => __( 'Post generated successfully.', 'ai-blog-posts' ),
+			'post_id' => $result['post_id'],
+			'edit_url' => get_edit_post_link( $result['post_id'], 'raw' ),
+		) );
+	}
+
+	/**
 	 * AJAX handler: Get generation logs.
 	 *
 	 * @since    1.0.0
@@ -487,8 +705,11 @@ class Ai_Blog_Posts_Admin {
 			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
 		}
 
+		// Check if force refresh is requested
+		$force_refresh = isset( $_POST['force_refresh'] ) && '1' === $_POST['force_refresh'];
+
 		$trends = new Ai_Blog_Posts_Trends();
-		$result = $trends->fetch_trending();
+		$result = $trends->fetch_trending( $force_refresh );
 
 		if ( is_wp_error( $result ) ) {
 			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
@@ -498,6 +719,102 @@ class Ai_Blog_Posts_Admin {
 			'message' => __( 'Trending topics fetched.', 'ai-blog-posts' ),
 			'topics'  => $result,
 		) );
+	}
+
+	/**
+	 * AJAX handler: Export logs to CSV.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_export_logs() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( __( 'Permission denied.', 'ai-blog-posts' ) );
+		}
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_logs';
+
+		$logs = $wpdb->get_results( "SELECT * FROM $table ORDER BY created_at DESC", ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		// Set headers for CSV download
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=ai-blog-posts-logs-' . date( 'Y-m-d' ) . '.csv' );
+		header( 'Pragma: no-cache' );
+		header( 'Expires: 0' );
+
+		$output = fopen( 'php://output', 'w' );
+
+		// Add CSV header
+		fputcsv( $output, array(
+			'ID',
+			'Post ID',
+			'Post Title',
+			'Model',
+			'Prompt Tokens',
+			'Completion Tokens',
+			'Total Tokens',
+			'Text Cost (USD)',
+			'Image Cost (USD)',
+			'Total Cost (USD)',
+			'Generation Time (s)',
+			'Topic Source',
+			'Status',
+			'Error Message',
+			'Date',
+		) );
+
+		// Add data rows
+		foreach ( $logs as $log ) {
+			$post_title = $log['post_id'] ? get_the_title( $log['post_id'] ) : 'N/A';
+			$total_cost = floatval( $log['cost_usd'] ) + floatval( $log['image_cost_usd'] );
+
+			fputcsv( $output, array(
+				$log['id'],
+				$log['post_id'] ?? 'N/A',
+				$post_title,
+				$log['model_used'],
+				$log['prompt_tokens'],
+				$log['completion_tokens'],
+				$log['total_tokens'],
+				number_format( $log['cost_usd'], 6 ),
+				number_format( $log['image_cost_usd'], 6 ),
+				number_format( $total_cost, 6 ),
+				$log['generation_time'],
+				$log['topic_source'],
+				$log['status'],
+				$log['error_message'] ?? '',
+				$log['created_at'],
+			) );
+		}
+
+		fclose( $output );
+		exit;
+	}
+
+	/**
+	 * AJAX handler: Clear all logs.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_clear_logs() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_logs';
+
+		$result = $wpdb->query( "TRUNCATE TABLE $table" ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		if ( false !== $result ) {
+			wp_send_json_success( array( 'message' => __( 'All logs have been cleared.', 'ai-blog-posts' ) ) );
+		} else {
+			wp_send_json_error( array( 'message' => __( 'Failed to clear logs.', 'ai-blog-posts' ) ) );
+		}
 	}
 
 	/**

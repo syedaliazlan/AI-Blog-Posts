@@ -126,10 +126,11 @@ $rankmath_active = class_exists( 'RankMath' );
 								<select id="model" name="model" class="regular-text">
 									<?php foreach ( $models as $model_id => $model_info ) : ?>
 										<option value="<?php echo esc_attr( $model_id ); ?>" <?php selected( $settings['model'], $model_id ); ?>>
-											<?php echo esc_html( $model_info['name'] ); ?> - <?php echo esc_html( $model_info['description'] ); ?>
+											<?php echo esc_html( $model_info['name'] ); ?><?php echo ! empty( $model_info['recommended'] ) ? ' ⭐' : ''; ?> - <?php echo esc_html( $model_info['description'] ); ?>
 										</option>
 									<?php endforeach; ?>
 								</select>
+								<p class="description"><?php esc_html_e( '⭐ = Recommended for blog writing. GPT-4o Mini offers the best value.', 'ai-blog-posts' ); ?></p>
 								<div class="model-pricing">
 									<?php foreach ( $models as $model_id => $model_info ) : ?>
 										<p class="model-price" data-model="<?php echo esc_attr( $model_id ); ?>" style="display: <?php echo $model_id === $settings['model'] ? 'block' : 'none'; ?>;">
