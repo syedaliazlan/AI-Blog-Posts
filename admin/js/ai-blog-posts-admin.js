@@ -38,7 +38,7 @@
 		bindEvents: function() {
 			// API Key verification
 			$('#verify-api-key').on('click', this.verifyApiKey.bind(this));
-			$('#toggle-api-key').on('click', this.toggleApiKeyVisibility);
+			$('#toggle-api-key').on('click', this.toggleApiKeyVisibility.bind(this));
 
 			// Settings form
 			$('#ai-blog-posts-settings-form').on('submit', this.saveSettings.bind(this));

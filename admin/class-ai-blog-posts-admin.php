@@ -66,9 +66,11 @@ class Ai_Blog_Posts_Admin {
 		$topics_table = $wpdb->prefix . 'ai_blog_posts_topics';
 		$logs_table = $wpdb->prefix . 'ai_blog_posts_logs';
 		
-		// Check if tables exist
-		$topics_exists = $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $topics_table ) ) === $topics_table;
-		$logs_exists = $wpdb->get_var( $wpdb->prepare( "SHOW TABLES LIKE %s", $logs_table ) ) === $logs_table;
+		// Check if tables exist (use direct query - table names are safe as they use $wpdb->prefix)
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$topics_exists = $wpdb->get_var( "SHOW TABLES LIKE '$topics_table'" ) === $topics_table;
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$logs_exists = $wpdb->get_var( "SHOW TABLES LIKE '$logs_table'" ) === $logs_table;
 		
 		// Create tables if they don't exist
 		if ( ! $topics_exists || ! $logs_exists ) {
@@ -526,7 +528,7 @@ class Ai_Blog_Posts_Admin {
 		$deleted = $wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM $table WHERE id IN ($placeholders)", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-				$topic_ids
+				...$topic_ids // Spread operator to expand array into individual arguments
 			)
 		);
 

@@ -29,13 +29,14 @@ if ( $status_filter ) {
 	$where_clause = $wpdb->prepare( ' WHERE status = %s', $status_filter );
 }
 
+// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $where_clause is already prepared above
 $total_topics = $wpdb->get_var( "SELECT COUNT(*) FROM $topics_table" . $where_clause );
+
+// Build query without double-preparing the WHERE clause
+// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- $where_clause is already prepared
+$query = "SELECT * FROM $topics_table $where_clause ORDER BY priority DESC, created_at DESC LIMIT %d OFFSET %d";
 $topics = $wpdb->get_results( 
-	$wpdb->prepare(
-		"SELECT * FROM $topics_table $where_clause ORDER BY priority DESC, created_at DESC LIMIT %d OFFSET %d",
-		$per_page,
-		$offset
-	)
+	$wpdb->prepare( $query, $per_page, $offset ) // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
 );
 
 $total_pages = ceil( $total_topics / $per_page );
