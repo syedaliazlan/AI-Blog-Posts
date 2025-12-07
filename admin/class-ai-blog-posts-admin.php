@@ -447,16 +447,31 @@ class Ai_Blog_Posts_Admin {
 			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
 		}
 
+		// Check if AI-powered analysis is requested
+		$use_ai = isset( $_POST['use_ai'] ) && ( 'true' === $_POST['use_ai'] || true === $_POST['use_ai'] );
+
+		// Verify API is configured if using AI
+		if ( $use_ai && ! Ai_Blog_Posts_Settings::is_verified() ) {
+			wp_send_json_error( array( 'message' => __( 'Please configure and verify your API key first to use AI-powered analysis.', 'ai-blog-posts' ) ) );
+		}
+
 		$analyzer = new Ai_Blog_Posts_Analyzer();
-		$result = $analyzer->analyze();
+		$result = $analyzer->analyze( $use_ai );
 
 		if ( is_wp_error( $result ) ) {
 			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
 		}
 
+		// Generate the style prompt for preview
+		$style_prompt = $analyzer->get_style_prompt();
+
 		wp_send_json_success( array(
-			'message'  => __( 'Website analyzed successfully.', 'ai-blog-posts' ),
-			'analysis' => $result,
+			'message'      => $use_ai 
+				? __( 'AI-powered analysis complete!', 'ai-blog-posts' ) 
+				: __( 'Quick analysis complete!', 'ai-blog-posts' ),
+			'analysis'     => $result,
+			'style_prompt' => $style_prompt,
+			'used_ai'      => $use_ai,
 		) );
 	}
 

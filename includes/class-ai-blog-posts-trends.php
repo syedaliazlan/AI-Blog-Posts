@@ -21,12 +21,12 @@
 class Ai_Blog_Posts_Trends {
 
 	/**
-	 * Google Trends RSS URL.
+	 * Google Trends JSON API URL.
 	 *
 	 * @since    1.0.0
 	 * @var      string
 	 */
-	private const TRENDS_RSS_URL = 'https://trends.google.com/trends/trendingsearches/daily/rss';
+	private const TRENDS_API_URL = 'https://trends.google.com/trends/api/dailytrends';
 
 	/**
 	 * Cache expiration in seconds.
@@ -53,12 +53,52 @@ class Ai_Blog_Posts_Trends {
 		}
 
 		$country = Ai_Blog_Posts_Settings::get( 'trending_country' );
-		$url = add_query_arg( 'geo', $country, self::TRENDS_RSS_URL );
+		
+		// Try Google Trends JSON API first
+		$topics = $this->fetch_from_google_trends( $country );
+		
+		// If Google Trends fails, use AI to generate relevant topics
+		if ( is_wp_error( $topics ) || empty( $topics ) ) {
+			$topics = $this->generate_trending_with_ai( $country );
+		}
+
+		if ( is_wp_error( $topics ) ) {
+			return $topics;
+		}
+
+		if ( empty( $topics ) ) {
+			return new WP_Error(
+				'no_topics',
+				__( 'No trending topics could be fetched. Please try again later.', 'ai-blog-posts' )
+			);
+		}
+
+		// Cache the results
+		set_transient( 'ai_blog_posts_trending_topics', $topics, self::CACHE_EXPIRATION );
+
+		return $topics;
+	}
+
+	/**
+	 * Fetch from Google Trends JSON API.
+	 *
+	 * @since    1.0.0
+	 * @param    string $country    Country code.
+	 * @return   array|WP_Error     Topics or error.
+	 */
+	private function fetch_from_google_trends( $country ) {
+		$url = add_query_arg( array(
+			'hl'  => 'en-' . $country,
+			'tz'  => '-480',
+			'geo' => $country,
+			'ns'  => '15',
+		), self::TRENDS_API_URL );
 
 		$response = wp_remote_get( $url, array(
 			'timeout' => 15,
 			'headers' => array(
-				'User-Agent' => 'WordPress/' . get_bloginfo( 'version' ),
+				'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+				'Accept'     => 'application/json',
 			),
 		) );
 
@@ -70,87 +110,148 @@ class Ai_Blog_Posts_Trends {
 		if ( 200 !== $code ) {
 			return new WP_Error(
 				'fetch_failed',
-				sprintf( __( 'Failed to fetch trends. HTTP code: %d', 'ai-blog-posts' ), $code )
+				sprintf( __( 'Google Trends returned HTTP %d. Using AI fallback.', 'ai-blog-posts' ), $code )
 			);
 		}
 
 		$body = wp_remote_retrieve_body( $response );
-		$topics = $this->parse_rss( $body );
-
-		if ( empty( $topics ) ) {
-			return new WP_Error(
-				'parse_failed',
-				__( 'No trending topics found or failed to parse response.', 'ai-blog-posts' )
-			);
-		}
-
-		// Cache the results
-		set_transient( 'ai_blog_posts_trending_topics', $topics, self::CACHE_EXPIRATION );
-
-		return $topics;
+		return $this->parse_google_trends_json( $body );
 	}
 
 	/**
-	 * Parse RSS feed.
+	 * Parse Google Trends JSON response.
 	 *
 	 * @since    1.0.0
-	 * @param    string $xml    XML content.
-	 * @return   array          Parsed topics.
+	 * @param    string $body    Response body.
+	 * @return   array           Parsed topics.
 	 */
-	private function parse_rss( $xml ) {
+	private function parse_google_trends_json( $body ) {
 		$topics = array();
 
-		// Suppress XML errors
-		libxml_use_internal_errors( true );
+		// Google prefixes with ")]}',\n" - remove it
+		$body = preg_replace( '/^\)\]\}\',?\s*/', '', $body );
 		
-		$doc = simplexml_load_string( $xml );
+		$data = json_decode( $body, true );
 		
-		if ( false === $doc ) {
+		if ( ! $data || ! isset( $data['default']['trendingSearchesDays'] ) ) {
 			return $topics;
 		}
 
-		// Register namespace
-		$namespaces = $doc->getNamespaces( true );
-		
-		foreach ( $doc->channel->item as $item ) {
-			$title = (string) $item->title;
-			
-			if ( empty( $title ) ) {
+		foreach ( $data['default']['trendingSearchesDays'] as $day ) {
+			if ( ! isset( $day['trendingSearches'] ) ) {
 				continue;
 			}
 
-			// Get traffic volume if available
-			$traffic = '';
-			if ( isset( $namespaces['ht'] ) ) {
-				$ht = $item->children( $namespaces['ht'] );
-				$traffic = isset( $ht->approx_traffic ) ? (string) $ht->approx_traffic : '';
-			}
+			foreach ( $day['trendingSearches'] as $search ) {
+				$title = $search['title']['query'] ?? '';
+				
+				if ( empty( $title ) ) {
+					continue;
+				}
 
-			// Get news items if available
-			$news_items = array();
-			if ( isset( $namespaces['ht'] ) ) {
-				$ht = $item->children( $namespaces['ht'] );
-				if ( isset( $ht->news_item ) ) {
-					foreach ( $ht->news_item as $news ) {
-						$news_items[] = array(
-							'title'  => (string) $news->news_item_title,
-							'url'    => (string) $news->news_item_url,
-							'source' => (string) $news->news_item_source,
+				$traffic = $search['formattedTraffic'] ?? '';
+				
+				// Get related articles
+				$articles = array();
+				if ( isset( $search['articles'] ) ) {
+					foreach ( array_slice( $search['articles'], 0, 2 ) as $article ) {
+						$articles[] = array(
+							'title'  => $article['title'] ?? '',
+							'url'    => $article['url'] ?? '',
+							'source' => $article['source'] ?? '',
 						);
 					}
 				}
-			}
 
-			$topics[] = array(
-				'title'       => $title,
-				'traffic'     => $traffic,
-				'link'        => (string) $item->link,
-				'pub_date'    => (string) $item->pubDate,
-				'news_items'  => $news_items,
+				$topics[] = array(
+					'title'       => $title,
+					'traffic'     => $traffic,
+					'link'        => 'https://trends.google.com/trends/explore?q=' . urlencode( $title ),
+					'articles'    => $articles,
+				);
+			}
+		}
+
+		return array_slice( $topics, 0, 20 ); // Limit to 20 topics
+	}
+
+	/**
+	 * Generate trending topics using AI as fallback.
+	 *
+	 * @since    1.0.0
+	 * @param    string $country    Country code.
+	 * @return   array|WP_Error     Topics or error.
+	 */
+	private function generate_trending_with_ai( $country ) {
+		if ( ! Ai_Blog_Posts_Settings::is_verified() ) {
+			return new WP_Error(
+				'api_not_configured',
+				__( 'Google Trends is unavailable and API key is not configured for AI fallback.', 'ai-blog-posts' )
 			);
 		}
 
-		return $topics;
+		$openai = new Ai_Blog_Posts_OpenAI();
+		
+		$country_names = self::get_countries();
+		$country_name = $country_names[ $country ] ?? 'United States';
+
+		// Get user's categories for context
+		$categories = Ai_Blog_Posts_Settings::get( 'categories' );
+		$category_context = '';
+		if ( ! empty( $categories ) ) {
+			$cat_names = array();
+			foreach ( $categories as $cat_id ) {
+				$cat = get_category( $cat_id );
+				if ( $cat ) {
+					$cat_names[] = $cat->name;
+				}
+			}
+			if ( ! empty( $cat_names ) ) {
+				$category_context = ' Focus on topics related to: ' . implode( ', ', $cat_names ) . '.';
+			}
+		}
+
+		$prompt = sprintf(
+			"Generate 10 currently trending blog post topics that would be popular in %s right now. " .
+			"Consider current events, seasonal topics, and popular interests.%s\n\n" .
+			"Return ONLY a JSON array of objects with 'title' and 'traffic' (estimated search interest like '100K+', '50K+', etc.) keys.\n" .
+			"Example: [{\"title\": \"Topic Name\", \"traffic\": \"100K+\"}]\n\n" .
+			"Make the topics specific and actionable for blog posts, not just keywords.",
+			$country_name,
+			$category_context
+		);
+
+		$result = $openai->generate_text( $prompt, 'You are a content strategist who tracks trending topics. Return only valid JSON.', array(
+			'max_tokens'  => 800,
+			'temperature' => 0.7,
+		) );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		// Parse JSON from response
+		$content = $result['content'];
+		if ( preg_match( '/\[[\s\S]*\]/', $content, $matches ) ) {
+			$topics = json_decode( $matches[0], true );
+			if ( is_array( $topics ) ) {
+				// Format to match expected structure
+				return array_map( function( $topic ) {
+					return array(
+						'title'    => $topic['title'] ?? $topic,
+						'traffic'  => $topic['traffic'] ?? '10K+',
+						'link'     => '',
+						'source'   => 'ai_generated',
+						'articles' => array(),
+					);
+				}, $topics );
+			}
+		}
+
+		return new WP_Error(
+			'parse_failed',
+			__( 'Failed to parse AI-generated topics.', 'ai-blog-posts' )
+		);
 	}
 
 	/**

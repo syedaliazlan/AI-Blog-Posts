@@ -53,8 +53,8 @@
 			$('#bulk-import').on('click', function() { $('#csv-import-modal').show(); });
 			$('.modal-close, .modal-cancel').on('click', function() { $(this).closest('.ai-blog-posts-modal').hide(); });
 
-			// Website analysis
-			$('#analyze-website').on('click', this.analyzeWebsite.bind(this));
+			// Website analysis (both quick and AI-powered buttons)
+			$('#analyze-website, #analyze-website-ai').on('click', this.analyzeWebsite.bind(this));
 
 			// Export CSV
 			$('#export-csv').on('click', this.exportLogs.bind(this));
@@ -531,43 +531,54 @@
 		analyzeWebsite: function(e) {
 			e.preventDefault();
 			
-			const $button = $(e.target);
+			const $button = $(e.currentTarget);
 			const $status = $('#analysis-status');
 			const $result = $('#analysis-result');
+			const useAi = $button.data('use-ai') === true || $button.data('use-ai') === 'true';
+			const originalHtml = $button.html();
 
-			$button.prop('disabled', true).text('Analyzing...');
-			$status.text('');
-			$result.hide();
+			// Disable both buttons during analysis
+			$('#analyze-website, #analyze-website-ai').prop('disabled', true);
+			
+			if (useAi) {
+				$button.html('<span class="dashicons dashicons-update spin"></span> AI Analyzing...');
+			} else {
+				$button.html('<span class="dashicons dashicons-update spin"></span> Analyzing...');
+			}
+			
+			$status.html('<span class="status-warning">Analyzing your content...</span>');
 
 			$.ajax({
 				url: aiBlogPosts.ajaxUrl,
 				type: 'POST',
 				data: {
 					action: 'ai_blog_posts_analyze_website',
-					nonce: aiBlogPosts.nonce
+					nonce: aiBlogPosts.nonce,
+					use_ai: useAi
 				},
+				timeout: 120000, // 2 minutes for AI analysis
 				success: function(response) {
 					if (response.success) {
-						$status.html('<span class="status-success">Analysis complete!</span>');
+						$status.html('<span class="status-success"><span class="dashicons dashicons-yes-alt"></span> ' + response.data.message + '</span>');
 						
-						// Show simplified analysis
-						const analysis = response.data.analysis;
-						let html = '<strong>Content Stats:</strong><br>';
-						html += 'Avg word count: ' + (analysis.content_stats?.avg_word_count || 'N/A') + '<br>';
-						html += 'Tone: ' + (analysis.writing_style?.tone || 'N/A') + '<br>';
-						html += 'Voice: ' + (analysis.writing_style?.voice || 'N/A') + '<br>';
-						html += 'Posts analyzed: ' + (analysis.posts_analyzed || 0);
-						
-						$result.html(html).show();
+						// Reload page to show full analysis with PHP rendering
+						setTimeout(function() {
+							location.reload();
+						}, 500);
 					} else {
-						$status.html('<span class="status-error">' + response.data.message + '</span>');
+						$status.html('<span class="status-error"><span class="dashicons dashicons-warning"></span> ' + response.data.message + '</span>');
+						$('#analyze-website, #analyze-website-ai').prop('disabled', false);
+						$button.html(originalHtml);
 					}
 				},
-				error: function() {
-					$status.html('<span class="status-error">Connection error.</span>');
-				},
-				complete: function() {
-					$button.prop('disabled', false).html('<span class="dashicons dashicons-search"></span> Analyze Website');
+				error: function(xhr, status, error) {
+					let errorMsg = 'Connection error.';
+					if (status === 'timeout') {
+						errorMsg = 'Request timed out. Please try again.';
+					}
+					$status.html('<span class="status-error"><span class="dashicons dashicons-warning"></span> ' + errorMsg + '</span>');
+					$('#analyze-website, #analyze-website-ai').prop('disabled', false);
+					$button.html(originalHtml);
 				}
 			});
 		},

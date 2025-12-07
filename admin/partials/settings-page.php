@@ -288,31 +288,193 @@ $rankmath_active = class_exists( 'RankMath' );
 					<h2><?php esc_html_e( 'Website Context', 'ai-blog-posts' ); ?></h2>
 					<p class="description"><?php esc_html_e( 'Analyze your existing content to help the AI match your writing style.', 'ai-blog-posts' ); ?></p>
 					
-					<table class="form-table">
-						<tr>
-							<th scope="row"><?php esc_html_e( 'Content Analysis', 'ai-blog-posts' ); ?></th>
-							<td>
-								<button type="button" id="analyze-website" class="button button-secondary">
-									<span class="dashicons dashicons-search"></span>
-									<?php esc_html_e( 'Analyze Website', 'ai-blog-posts' ); ?>
-								</button>
-								<span id="analysis-status">
-									<?php if ( ! empty( $settings['last_analysis'] ) ) : ?>
-										<span class="status-success">
-											<?php 
-											printf(
-												/* translators: %s: date of last analysis */
-												esc_html__( 'Last analyzed: %s', 'ai-blog-posts' ),
-												esc_html( date_i18n( get_option( 'date_format' ), strtotime( $settings['last_analysis'] ) ) )
-											);
-											?>
-										</span>
-									<?php endif; ?>
+					<div class="analysis-actions">
+						<button type="button" id="analyze-website" class="button button-secondary" data-use-ai="false">
+							<span class="dashicons dashicons-search"></span>
+							<?php esc_html_e( 'Quick Analysis', 'ai-blog-posts' ); ?>
+						</button>
+						<button type="button" id="analyze-website-ai" class="button button-primary" data-use-ai="true">
+							<span class="dashicons dashicons-superhero-alt"></span>
+							<?php esc_html_e( 'AI-Powered Analysis', 'ai-blog-posts' ); ?>
+							<span class="cost-badge">~$0.01</span>
+						</button>
+						<span id="analysis-status">
+							<?php if ( ! empty( $settings['last_analysis'] ) ) : ?>
+								<span class="status-success">
+									<?php 
+									printf(
+										/* translators: %s: date of last analysis */
+										esc_html__( 'Last analyzed: %s', 'ai-blog-posts' ),
+										esc_html( date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $settings['last_analysis'] ) ) )
+									);
+									?>
 								</span>
-								<div id="analysis-result" class="analysis-result" style="display:none;"></div>
-							</td>
-						</tr>
-					</table>
+							<?php endif; ?>
+						</span>
+					</div>
+
+					<?php
+					// Get cached analysis
+					$analyzer = new Ai_Blog_Posts_Analyzer();
+					$cached_analysis = $analyzer->get_cached_analysis();
+					?>
+
+					<div id="analysis-result" class="analysis-result-full" <?php echo empty( $cached_analysis ) ? 'style="display:none;"' : ''; ?>>
+						<?php if ( ! empty( $cached_analysis ) ) : ?>
+							<div class="analysis-grid">
+								<!-- Content Stats -->
+								<div class="analysis-card">
+									<h4><span class="dashicons dashicons-chart-bar"></span> <?php esc_html_e( 'Content Statistics', 'ai-blog-posts' ); ?></h4>
+									<div class="analysis-data">
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Average Word Count', 'ai-blog-posts' ); ?></span>
+											<span class="data-value"><?php echo esc_html( $cached_analysis['content_stats']['avg_word_count'] ?? 'N/A' ); ?></span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Word Count Range', 'ai-blog-posts' ); ?></span>
+											<span class="data-value">
+												<?php 
+												echo esc_html( 
+													( $cached_analysis['content_stats']['min_word_count'] ?? 0 ) . ' - ' . 
+													( $cached_analysis['content_stats']['max_word_count'] ?? 0 ) 
+												); 
+												?>
+											</span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Avg Paragraphs', 'ai-blog-posts' ); ?></span>
+											<span class="data-value"><?php echo esc_html( $cached_analysis['content_stats']['avg_paragraphs'] ?? 'N/A' ); ?></span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Avg Headings', 'ai-blog-posts' ); ?></span>
+											<span class="data-value"><?php echo esc_html( $cached_analysis['content_stats']['avg_headings'] ?? 'N/A' ); ?></span>
+										</div>
+									</div>
+								</div>
+
+								<!-- Writing Style -->
+								<div class="analysis-card">
+									<h4><span class="dashicons dashicons-edit"></span> <?php esc_html_e( 'Writing Style', 'ai-blog-posts' ); ?></h4>
+									<div class="analysis-data">
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Tone', 'ai-blog-posts' ); ?></span>
+											<span class="data-value style-badge tone-<?php echo esc_attr( $cached_analysis['writing_style']['tone'] ?? '' ); ?>">
+												<?php echo esc_html( ucfirst( $cached_analysis['writing_style']['tone'] ?? 'N/A' ) ); ?>
+											</span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Voice', 'ai-blog-posts' ); ?></span>
+											<span class="data-value style-badge">
+												<?php 
+												$voice = $cached_analysis['writing_style']['voice'] ?? '';
+												$voice_labels = array(
+													'first_person' => __( 'First Person (we, our)', 'ai-blog-posts' ),
+													'second_person' => __( 'Second Person (you)', 'ai-blog-posts' ),
+													'third_person' => __( 'Third Person', 'ai-blog-posts' ),
+												);
+												echo esc_html( $voice_labels[ $voice ] ?? ucfirst( str_replace( '_', ' ', $voice ) ) );
+												?>
+											</span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Avg Sentence Length', 'ai-blog-posts' ); ?></span>
+											<span class="data-value"><?php echo esc_html( $cached_analysis['writing_style']['avg_sentence_length'] ?? 'N/A' ); ?> <?php esc_html_e( 'words', 'ai-blog-posts' ); ?></span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Uses Questions', 'ai-blog-posts' ); ?></span>
+											<span class="data-value">
+												<?php if ( ! empty( $cached_analysis['writing_style']['uses_questions'] ) ) : ?>
+													<span class="dashicons dashicons-yes-alt" style="color: var(--aibp-success);"></span> <?php esc_html_e( 'Yes', 'ai-blog-posts' ); ?>
+												<?php else : ?>
+													<span class="dashicons dashicons-minus" style="color: var(--aibp-gray-400);"></span> <?php esc_html_e( 'Rarely', 'ai-blog-posts' ); ?>
+												<?php endif; ?>
+											</span>
+										</div>
+									</div>
+								</div>
+
+								<!-- Structure -->
+								<div class="analysis-card">
+									<h4><span class="dashicons dashicons-layout"></span> <?php esc_html_e( 'Content Structure', 'ai-blog-posts' ); ?></h4>
+									<div class="analysis-data">
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Has Introduction', 'ai-blog-posts' ); ?></span>
+											<span class="data-value">
+												<?php echo ! empty( $cached_analysis['structure']['typically_has_intro'] ) ? '<span class="dashicons dashicons-yes-alt" style="color: var(--aibp-success);"></span>' : '<span class="dashicons dashicons-minus" style="color: var(--aibp-gray-400);"></span>'; ?>
+											</span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Has Conclusion', 'ai-blog-posts' ); ?></span>
+											<span class="data-value">
+												<?php echo ! empty( $cached_analysis['structure']['typically_has_conclusion'] ) ? '<span class="dashicons dashicons-yes-alt" style="color: var(--aibp-success);"></span>' : '<span class="dashicons dashicons-minus" style="color: var(--aibp-gray-400);"></span>'; ?>
+											</span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Uses Lists', 'ai-blog-posts' ); ?></span>
+											<span class="data-value">
+												<?php echo ! empty( $cached_analysis['structure']['uses_lists_frequently'] ) ? '<span class="dashicons dashicons-yes-alt" style="color: var(--aibp-success);"></span>' : '<span class="dashicons dashicons-minus" style="color: var(--aibp-gray-400);"></span>'; ?>
+											</span>
+										</div>
+										<div class="data-row">
+											<span class="data-label"><?php esc_html_e( 'Uses Images', 'ai-blog-posts' ); ?></span>
+											<span class="data-value">
+												<?php echo ! empty( $cached_analysis['structure']['uses_images'] ) ? '<span class="dashicons dashicons-yes-alt" style="color: var(--aibp-success);"></span>' : '<span class="dashicons dashicons-minus" style="color: var(--aibp-gray-400);"></span>'; ?>
+											</span>
+										</div>
+									</div>
+								</div>
+
+								<!-- Topics & Keywords -->
+								<div class="analysis-card">
+									<h4><span class="dashicons dashicons-tag"></span> <?php esc_html_e( 'Common Keywords', 'ai-blog-posts' ); ?></h4>
+									<div class="keyword-cloud">
+										<?php 
+										$keywords = $cached_analysis['topics']['common_keywords'] ?? array();
+										$keywords = array_slice( $keywords, 0, 15 );
+										foreach ( $keywords as $keyword ) : ?>
+											<span class="keyword-tag"><?php echo esc_html( $keyword ); ?></span>
+										<?php endforeach; ?>
+										<?php if ( empty( $keywords ) ) : ?>
+											<em><?php esc_html_e( 'No keywords extracted', 'ai-blog-posts' ); ?></em>
+										<?php endif; ?>
+									</div>
+								</div>
+							</div>
+
+							<!-- AI Insights (if available) -->
+							<?php if ( ! empty( $cached_analysis['ai_insights']['style_guide'] ) ) : ?>
+								<div class="analysis-card ai-insights-card">
+									<h4><span class="dashicons dashicons-superhero-alt"></span> <?php esc_html_e( 'AI Style Guide', 'ai-blog-posts' ); ?></h4>
+									<div class="ai-style-guide">
+										<?php echo wp_kses_post( nl2br( esc_html( $cached_analysis['ai_insights']['style_guide'] ) ) ); ?>
+									</div>
+									<p class="tokens-used">
+										<small><?php printf( esc_html__( 'Tokens used: %d', 'ai-blog-posts' ), $cached_analysis['ai_insights']['tokens_used'] ?? 0 ); ?></small>
+									</p>
+								</div>
+							<?php endif; ?>
+
+							<!-- Generated Style Prompt -->
+							<div class="analysis-card style-prompt-card">
+								<h4><span class="dashicons dashicons-format-quote"></span> <?php esc_html_e( 'Generated Style Prompt', 'ai-blog-posts' ); ?></h4>
+								<p class="description"><?php esc_html_e( 'This prompt is automatically added when generating content:', 'ai-blog-posts' ); ?></p>
+								<div class="style-prompt-preview">
+									<code><?php echo esc_html( $analyzer->get_style_prompt() ); ?></code>
+								</div>
+							</div>
+
+							<p class="analysis-meta">
+								<span class="dashicons dashicons-clock"></span>
+								<?php 
+								printf(
+									esc_html__( 'Based on %d posts analyzed on %s', 'ai-blog-posts' ),
+									$cached_analysis['posts_analyzed'] ?? 0,
+									date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $cached_analysis['analyzed_at'] ?? '' ) )
+								);
+								?>
+							</p>
+						<?php endif; ?>
+					</div>
 				</div>
 			</div>
 

@@ -57,6 +57,52 @@
 }
 
 /* ==========================================================================
+   Global Button Styles - Icon Alignment Fix
+   ========================================================================== */
+
+.ai-blog-posts-wrap .button,
+.ai-blog-posts-wrap button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	vertical-align: middle;
+}
+
+.ai-blog-posts-wrap .button .dashicons,
+.ai-blog-posts-wrap button .dashicons {
+	font-size: 16px;
+	width: 16px;
+	height: 16px;
+	line-height: 1;
+	vertical-align: middle;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.ai-blog-posts-wrap .button.button-hero .dashicons,
+.ai-blog-posts-wrap button.button-hero .dashicons {
+	font-size: 18px;
+	width: 18px;
+	height: 18px;
+}
+
+.ai-blog-posts-wrap .button.button-large .dashicons,
+.ai-blog-posts-wrap button.button-large .dashicons {
+	font-size: 18px;
+	width: 18px;
+	height: 18px;
+}
+
+/* Fix for dashicons before pseudo-element alignment */
+.ai-blog-posts-wrap .button .dashicons::before,
+.ai-blog-posts-wrap button .dashicons::before {
+	line-height: 1;
+	vertical-align: middle;
+}
+
+/* ==========================================================================
    Cards
    ========================================================================== */
 
@@ -657,9 +703,27 @@
 
 .form-actions {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 12px;
 	padding-top: 16px;
 	border-top: 1px solid var(--aibp-gray-200);
+}
+
+.form-actions .button-hero {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 24px;
+	font-size: 14px;
+	height: auto;
+	line-height: 1.4;
+}
+
+.form-actions .button-hero .dashicons {
+	font-size: 18px;
+	width: 18px;
+	height: 18px;
+	line-height: 1;
 }
 
 /* Preview Container */
@@ -1230,16 +1294,203 @@
    Analysis Result
    ========================================================================== */
 
-.analysis-result {
-	margin-top: 16px;
-	padding: 16px;
-	background: var(--aibp-gray-50);
+.analysis-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 24px;
+}
+
+.analysis-actions .button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.analysis-actions .cost-badge {
+	background: rgba(255, 255, 255, 0.2);
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.analysis-result-full {
+	margin-top: 24px;
+}
+
+.analysis-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+	gap: 20px;
+	margin-bottom: 20px;
+}
+
+.analysis-card {
+	background: #fff;
+	border: 1px solid var(--aibp-gray-200);
 	border-radius: var(--aibp-radius);
+	padding: 20px;
+}
+
+.analysis-card h4 {
+	margin: 0 0 16px 0;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--aibp-gray-100);
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--aibp-gray-800);
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.analysis-card h4 .dashicons {
+	color: var(--aibp-primary);
+	font-size: 18px;
+	width: 18px;
+	height: 18px;
+}
+
+.analysis-data {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.data-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.data-label {
+	color: var(--aibp-gray-600);
 	font-size: 13px;
 }
 
-.analysis-result pre {
+.data-value {
+	font-weight: 600;
+	color: var(--aibp-gray-900);
+	font-size: 13px;
+}
+
+.style-badge {
+	display: inline-block;
+	padding: 3px 10px;
+	background: var(--aibp-primary-light);
+	color: var(--aibp-primary);
+	border-radius: 12px;
+	font-size: 12px;
+	font-weight: 500;
+}
+
+.style-badge.tone-formal {
+	background: #e0e7ff;
+	color: #4338ca;
+}
+
+.style-badge.tone-casual {
+	background: #fef3c7;
+	color: #d97706;
+}
+
+.style-badge.tone-neutral {
+	background: var(--aibp-gray-100);
+	color: var(--aibp-gray-600);
+}
+
+.keyword-cloud {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.keyword-cloud .keyword-tag {
+	background: var(--aibp-gray-100);
+	color: var(--aibp-gray-700);
+	padding: 4px 10px;
+	border-radius: 4px;
+	font-size: 12px;
 	margin: 0;
+}
+
+/* AI Insights Card */
+.ai-insights-card {
+	grid-column: 1 / -1;
+	background: linear-gradient(135deg, #eff6ff, #fff);
+	border-color: var(--aibp-primary-light);
+}
+
+.ai-insights-card h4 .dashicons {
+	color: #f59e0b;
+}
+
+.ai-style-guide {
+	background: #fff;
+	border: 1px solid var(--aibp-gray-200);
+	border-radius: var(--aibp-radius);
+	padding: 16px;
+	font-size: 14px;
+	line-height: 1.7;
+	color: var(--aibp-gray-700);
+}
+
+.tokens-used {
+	margin: 12px 0 0 0;
+	text-align: right;
+	color: var(--aibp-gray-400);
+}
+
+/* Style Prompt Card */
+.style-prompt-card {
+	grid-column: 1 / -1;
+	background: var(--aibp-gray-50);
+}
+
+.style-prompt-preview {
+	background: #fff;
+	border: 1px solid var(--aibp-gray-200);
+	border-radius: var(--aibp-radius);
+	padding: 12px 16px;
+	margin-top: 12px;
+}
+
+.style-prompt-preview code {
+	display: block;
+	font-size: 13px;
+	line-height: 1.6;
+	color: var(--aibp-gray-700);
 	white-space: pre-wrap;
-	word-wrap: break-word;
+	word-break: break-word;
+	background: transparent;
+	padding: 0;
+}
+
+.analysis-meta {
+	margin: 20px 0 0 0;
+	padding-top: 16px;
+	border-top: 1px solid var(--aibp-gray-200);
+	color: var(--aibp-gray-500);
+	font-size: 13px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.analysis-meta .dashicons {
+	font-size: 14px;
+	width: 14px;
+	height: 14px;
+}
+
+/* Spinning animation for loading */
+@keyframes spin {
+	from { transform: rotate(0deg); }
+	to { transform: rotate(360deg); }
+}
+
+.dashicons.spin {
+	animation: spin 1s linear infinite;
 }
