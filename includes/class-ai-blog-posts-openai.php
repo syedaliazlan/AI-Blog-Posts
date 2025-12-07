@@ -45,7 +45,7 @@ class Ai_Blog_Posts_OpenAI {
 	 * @since    1.0.0
 	 * @var      int
 	 */
-	private const TIMEOUT = 120;
+	private const TIMEOUT = 300; // 5 minutes for longer generations
 
 	/**
 	 * The API key.
@@ -155,11 +155,19 @@ class Ai_Blog_Posts_OpenAI {
 
 		$messages = array();
 
+		// Check if model supports system messages (o1/reasoning models don't)
+		$is_reasoning_model = $this->is_reasoning_model( $model );
+		
 		if ( ! empty( $system_prompt ) ) {
-			$messages[] = array(
-				'role'    => 'system',
-				'content' => $system_prompt,
-			);
+			if ( $is_reasoning_model ) {
+				// For reasoning models, prepend system prompt to user message
+				$prompt = "Instructions: " . $system_prompt . "\n\n" . $prompt;
+			} else {
+				$messages[] = array(
+					'role'    => 'system',
+					'content' => $system_prompt,
+				);
+			}
 		}
 
 		$messages[] = array(
@@ -167,12 +175,23 @@ class Ai_Blog_Posts_OpenAI {
 			'content' => $prompt,
 		);
 
+		// Build request body based on model capabilities
 		$body = array(
-			'model'       => $model,
-			'messages'    => $messages,
-			'max_tokens'  => $max_tokens,
-			'temperature' => $temperature,
+			'model'    => $model,
+			'messages' => $messages,
 		);
+
+		// Use max_completion_tokens for newer models, max_tokens for legacy
+		if ( $this->uses_max_completion_tokens( $model ) ) {
+			$body['max_completion_tokens'] = $max_tokens;
+		} else {
+			$body['max_tokens'] = $max_tokens;
+		}
+
+		// Only add temperature for models that support it
+		if ( $this->supports_temperature( $model ) ) {
+			$body['temperature'] = $temperature;
+		}
 
 		$start_time = microtime( true );
 		$response = $this->make_request( 'POST', '/chat/completions', $body );
@@ -209,6 +228,73 @@ class Ai_Blog_Posts_OpenAI {
 			'generation_time'   => $generation_time,
 			'finish_reason'     => $response['choices'][0]['finish_reason'] ?? 'unknown',
 		);
+	}
+
+	/**
+	 * Check if a model uses max_completion_tokens parameter.
+	 *
+	 * @since    1.0.0
+	 * @param    string $model    The model ID.
+	 * @return   bool             True if uses max_completion_tokens.
+	 */
+	private function uses_max_completion_tokens( $model ) {
+		// All GPT-5.x, GPT-4.1.x, GPT-4o, o1, o3, o4 models use max_completion_tokens
+		$new_model_prefixes = array(
+			'gpt-5',    // GPT-5, GPT-5.1, GPT-5-mini, GPT-5-nano, GPT-5-pro
+			'gpt-4.1',  // GPT-4.1, GPT-4.1-mini
+			'gpt-4o',   // GPT-4o, GPT-4o-mini
+			'o1',       // o1, o1-mini, o1-pro
+			'o3',       // o3, o3-mini, o3-pro
+			'o4',       // o4-mini
+		);
+
+		foreach ( $new_model_prefixes as $prefix ) {
+			if ( strpos( $model, $prefix ) === 0 ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if a model is a reasoning model (o1, o3, o4 series).
+	 *
+	 * @since    1.0.0
+	 * @param    string $model    The model ID.
+	 * @return   bool             True if reasoning model.
+	 */
+	private function is_reasoning_model( $model ) {
+		// Reasoning models don't support temperature or system messages
+		$reasoning_prefixes = array( 'o1', 'o3', 'o4' );
+
+		foreach ( $reasoning_prefixes as $prefix ) {
+			if ( strpos( $model, $prefix ) === 0 ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Check if a model supports custom temperature values.
+	 *
+	 * @since    1.0.0
+	 * @param    string $model    The model ID.
+	 * @return   bool             True if supports custom temperature.
+	 */
+	private function supports_temperature( $model ) {
+		// GPT-5 series and reasoning models only support default temperature (1)
+		$no_temp_prefixes = array( 'gpt-5', 'o1', 'o3', 'o4' );
+
+		foreach ( $no_temp_prefixes as $prefix ) {
+			if ( strpos( $model, $prefix ) === 0 ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
@@ -584,13 +670,22 @@ class Ai_Blog_Posts_OpenAI {
 	 * @return   array            Filtered models.
 	 */
 	private function filter_relevant_models( $models ) {
-		$relevant = array( 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo', 'dall-e-3', 'dall-e-2' );
+		// Include all GPT-5, GPT-4, o-series and image models
+		$relevant_prefixes = array(
+			'gpt-5',      // GPT-5.x series
+			'gpt-4',      // GPT-4.x series (including 4o, 4.1, 4-turbo)
+			'gpt-3.5',    // Legacy
+			'o1',         // o1 reasoning models
+			'o3',         // o3 reasoning models
+			'o4',         // o4 reasoning models
+			'dall-e',     // Image models
+		);
 		$filtered = array();
 
 		foreach ( $models as $model ) {
 			$id = $model['id'] ?? '';
-			foreach ( $relevant as $r ) {
-				if ( strpos( $id, $r ) === 0 ) {
+			foreach ( $relevant_prefixes as $prefix ) {
+				if ( strpos( $id, $prefix ) === 0 ) {
 					$filtered[] = $id;
 					break;
 				}

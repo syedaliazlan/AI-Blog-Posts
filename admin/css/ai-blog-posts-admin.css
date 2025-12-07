@@ -1707,3 +1707,143 @@
 	background: var(--aibp-primary-light);
 	color: var(--aibp-primary);
 }
+
+/* Generating state */
+.topics-table tr.generating {
+	background: #e8f4fc !important;
+	animation: pulse-row 1.5s infinite;
+}
+
+.topics-table tr.generating td {
+	background: transparent !important;
+}
+
+@keyframes pulse-row {
+	0%, 100% { background: #e8f4fc; }
+	50% { background: #d4ebfa; }
+}
+
+.topics-table .status-badge.generating {
+	background: #e8f4fc;
+	color: #0073aa;
+	border: 1px solid #0073aa;
+}
+
+.generating-indicator {
+	display: inline-flex;
+	align-items: center;
+	color: #0073aa;
+}
+
+.generating-indicator .spinner {
+	visibility: visible !important;
+	float: none !important;
+	margin: 0 8px 0 0 !important;
+	background-size: 20px 20px;
+}
+
+.generating-text {
+	color: var(--aibp-primary);
+	display: inline-flex;
+	align-items: center;
+}
+
+.generating-text .spinner {
+	margin-right: 5px;
+	visibility: visible !important;
+}
+
+/* Hide row actions during generation */
+.topics-table tr.generating .row-actions .generate,
+.topics-table tr.generating .row-actions .retry,
+.topics-table tr.generating .row-actions .delete {
+	display: none !important;
+}
+
+/* Generated success state */
+.topics-table tr.generated {
+	background: #f0fff0 !important;
+}
+
+/* Error tooltip - custom CSS tooltip */
+.error-tooltip {
+	position: relative;
+	cursor: help;
+	display: inline-flex;
+	align-items: center;
+	margin-left: 5px;
+}
+
+.error-tooltip .dashicons {
+	color: var(--aibp-error);
+	font-size: 16px;
+	width: 16px;
+	height: 16px;
+}
+
+.error-tooltip::after {
+	content: attr(title);
+	position: absolute;
+	bottom: 100%;
+	left: 50%;
+	transform: translateX(-50%);
+	background: #333;
+	color: #fff;
+	padding: 8px 12px;
+	border-radius: 4px;
+	font-size: 12px;
+	white-space: nowrap;
+	max-width: 300px;
+	white-space: normal;
+	z-index: 1000;
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 0.2s, visibility 0.2s;
+	pointer-events: none;
+	box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.error-tooltip::before {
+	content: '';
+	position: absolute;
+	bottom: calc(100% - 5px);
+	left: 50%;
+	transform: translateX(-50%);
+	border: 5px solid transparent;
+	border-top-color: #333;
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 0.2s, visibility 0.2s;
+	z-index: 1001;
+}
+
+.error-tooltip:hover::after,
+.error-tooltip:hover::before {
+	opacity: 1;
+	visibility: visible;
+}
+
+/* Retry link styling */
+.row-actions .retry a {
+	color: var(--aibp-warning);
+}
+
+.row-actions .retry a:hover {
+	color: var(--aibp-warning-dark, #e67e00);
+}
+
+/* Status badge colors */
+.status-badge.pending {
+	background: var(--aibp-warning-light);
+	color: var(--aibp-warning);
+}
+
+.status-badge.completed {
+	background: var(--aibp-success-light);
+	color: var(--aibp-success);
+}
+
+.status-badge.failed {
+	background: var(--aibp-error-light);
+	color: var(--aibp-error);
+}

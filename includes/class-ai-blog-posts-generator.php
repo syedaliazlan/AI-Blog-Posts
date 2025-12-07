@@ -373,6 +373,11 @@ class Ai_Blog_Posts_Generator {
 			return $content;
 		}
 
+		// Skip if content is too short (likely an error)
+		if ( strlen( wp_strip_all_tags( $content ) ) < 200 ) {
+			return $content;
+		}
+
 		$intensity_map = array(
 			3 => 'moderate',
 			4 => 'substantial',
@@ -381,20 +386,22 @@ class Ai_Blog_Posts_Generator {
 
 		$intensity = $intensity_map[ $level ] ?? 'moderate';
 
-		$system_prompt = "You are an expert editor who makes AI-generated content sound more natural and human-written. " .
-			"Maintain the original meaning, structure, and HTML formatting while making the writing feel more authentic.";
+		$system_prompt = "You are an expert editor. Your task is to rewrite the provided HTML blog content to sound more natural and human-written. " .
+			"You MUST output the complete rewritten content with all HTML tags preserved. Do not ask questions or request clarification - just rewrite the content provided below.";
 
 		$prompt = sprintf(
-			"Revise the following blog post to sound more natural and human-written. Apply %s humanization:\n\n" .
-			"Guidelines:\n" .
-			"- Vary sentence structures and lengths\n" .
-			"- Add conversational elements where appropriate\n" .
-			"- Use more varied vocabulary\n" .
-			"- Remove any robotic or formulaic patterns\n" .
-			"- AVOID these AI clichés: 'dive into', 'delve into', 'it's important to note', 'in today's world', 'in conclusion', 'firstly/secondly/thirdly', 'game-changer', 'leverage', 'unlock'\n" .
-			"- Keep the HTML structure intact (<h2>, <h3>, <p>, <ul>, etc.)\n" .
-			"- Maintain the same approximate length\n\n" .
-			"Content to humanize:\n%s",
+			"TASK: Rewrite this blog post to sound more natural and human-written.\n\n" .
+			"INTENSITY: %s rewriting\n\n" .
+			"RULES:\n" .
+			"1. Output ONLY the rewritten HTML content - no explanations or questions\n" .
+			"2. Vary sentence structures and lengths\n" .
+			"3. Add conversational elements where appropriate\n" .
+			"4. Use more varied vocabulary\n" .
+			"5. Remove robotic or formulaic patterns\n" .
+			"6. NEVER use: 'dive into', 'delve into', 'it's important to note', 'in today's world', 'in conclusion', 'firstly/secondly/thirdly', 'game-changer', 'leverage', 'unlock', 'landscape', 'tapestry'\n" .
+			"7. PRESERVE all HTML tags (<h2>, <h3>, <p>, <ul>, <li>, etc.)\n" .
+			"8. Keep approximately the same length\n\n" .
+			"CONTENT TO REWRITE:\n\n%s",
 			$intensity,
 			$content
 		);
@@ -410,8 +417,15 @@ class Ai_Blog_Posts_Generator {
 		}
 
 		$this->track_tokens( $result );
+		
+		// Verify the result looks like HTML content
+		$result_content = $result['content'];
+		if ( strpos( $result_content, '<' ) === false || strlen( $result_content ) < 200 ) {
+			// AI didn't return proper content, use original
+			return $content;
+		}
 
-		return $result['content'];
+		return $result_content;
 	}
 
 	/**
@@ -545,17 +559,14 @@ class Ai_Blog_Posts_Generator {
 	 * @return   array|WP_Error     Result or error.
 	 */
 	private function generate_featured_image( $post_id, $topic, $title ) {
-		$image_prompt = sprintf(
-			"Create a professional, high-quality blog header image for an article titled '%s'. " .
-			"The image should be clean, modern, and suitable for a professional blog. " .
-			"Use appropriate imagery that represents the topic visually. " .
-			"Avoid text in the image. Make it visually appealing with good composition.",
-			$title
-		);
+		// Create a visual concept prompt - NO text allowed
+		$image_prompt = $this->create_image_prompt( $title, $topic );
 
 		$result = $this->openai->generate_image( $image_prompt, array(
-			'model' => Ai_Blog_Posts_Settings::get( 'image_model' ),
-			'size'  => Ai_Blog_Posts_Settings::get( 'image_size' ),
+			'model'   => Ai_Blog_Posts_Settings::get( 'image_model' ),
+			'size'    => Ai_Blog_Posts_Settings::get( 'image_size' ),
+			'style'   => 'natural', // More photorealistic
+			'quality' => 'hd',      // Higher quality
 		) );
 
 		if ( is_wp_error( $result ) ) {
@@ -580,6 +591,150 @@ class Ai_Blog_Posts_Generator {
 			'attachment_id' => $attachment_id,
 			'cost_usd'      => $result['cost_usd'],
 		);
+	}
+
+	/**
+	 * Create an optimized image prompt for DALL-E.
+	 *
+	 * @since    1.0.0
+	 * @param    string $title    Post title.
+	 * @param    string $topic    Original topic.
+	 * @return   string           Optimized prompt.
+	 */
+	private function create_image_prompt( $title, $topic ) {
+		// Extract key concepts from the title for visual representation
+		$visual_subject = $this->extract_visual_concept( $title );
+		
+		$prompt = sprintf(
+			"Professional photorealistic image representing: %s. " .
+			"CRITICAL REQUIREMENTS: " .
+			"1. ABSOLUTELY NO TEXT, words, letters, numbers, labels, captions, watermarks, or any written content in the image. " .
+			"2. NO signs, banners, screens, or surfaces with text. " .
+			"3. Style: Clean, modern, high-quality stock photo aesthetic. " .
+			"4. Lighting: Professional, well-lit, natural lighting. " .
+			"5. Composition: Rule of thirds, visually balanced, suitable as a blog header. " .
+			"6. Subject: Real objects, environments, or scenes that visually represent the topic. " .
+			"7. Quality: Sharp focus, high resolution, professional photography style. " .
+			"Generate a visually compelling image that tells the story through imagery alone, not through any text or words.",
+			$visual_subject
+		);
+
+		return $prompt;
+	}
+
+	/**
+	 * Extract visual concepts from a title for image generation.
+	 *
+	 * @since    1.0.0
+	 * @param    string $title    Post title.
+	 * @return   string           Visual concept description.
+	 */
+	private function extract_visual_concept( $title ) {
+		// Universal topic-to-visual mappings (works for any website globally)
+		$visual_mappings = array(
+			// Technology
+			'technology'   => 'modern technology workspace with laptop and devices',
+			'ai'           => 'futuristic abstract digital network visualization',
+			'software'     => 'clean modern computer workspace',
+			'digital'      => 'modern digital devices showing connectivity',
+			'app'          => 'smartphone with abstract colorful interface elements',
+			'coding'       => 'developer workspace with code on multiple screens',
+			'computer'     => 'sleek modern computer setup',
+			'internet'     => 'global connectivity network visualization',
+			'cyber'        => 'digital security concept with abstract elements',
+			'robot'        => 'modern robotics and automation',
+			
+			// Business/Finance
+			'business'     => 'professional modern office environment',
+			'finance'      => 'financial growth charts and professional workspace',
+			'investment'   => 'growth concept with ascending visual elements',
+			'money'        => 'financial success and prosperity concept',
+			'market'       => 'dynamic trading or marketplace environment',
+			'economy'      => 'modern cityscape representing commerce',
+			'startup'      => 'innovative modern workspace with creative energy',
+			'entrepreneur' => 'confident professional in modern setting',
+			'career'       => 'professional advancement and success concept',
+			'job'          => 'professional workplace environment',
+			
+			// Health/Wellness
+			'health'       => 'healthy lifestyle with fresh food and active living',
+			'fitness'      => 'athletic movement and exercise environment',
+			'wellness'     => 'peaceful zen environment with natural elements',
+			'medical'      => 'clean healthcare environment',
+			'mental'       => 'peaceful meditation and mindfulness scene',
+			'nutrition'    => 'colorful fresh healthy food arrangement',
+			'exercise'     => 'dynamic fitness and movement',
+			'yoga'         => 'serene yoga practice in peaceful setting',
+			
+			// Education
+			'university'   => 'impressive academic campus architecture',
+			'education'    => 'inspiring learning environment with books',
+			'learning'     => 'bright study space with educational materials',
+			'school'       => 'modern educational facility',
+			'student'      => 'young person engaged in learning',
+			'course'       => 'organized educational materials and resources',
+			'training'     => 'professional development environment',
+			'skill'        => 'hands-on learning and practice',
+			
+			// Travel/Lifestyle
+			'travel'       => 'stunning scenic destination landscape',
+			'food'         => 'beautifully styled gourmet cuisine',
+			'home'         => 'cozy modern interior living space',
+			'fashion'      => 'stylish clothing and accessories arrangement',
+			'garden'       => 'lush flourishing garden landscape',
+			'cooking'      => 'inviting kitchen with fresh ingredients',
+			'restaurant'   => 'elegant dining atmosphere',
+			'vacation'     => 'relaxing paradise destination',
+			
+			// Environment/Nature
+			'climate'      => 'dramatic environmental landscape',
+			'sustainable'  => 'eco-friendly green living concept',
+			'energy'       => 'renewable energy like solar panels or wind turbines',
+			'nature'       => 'beautiful natural wilderness landscape',
+			'environment'  => 'pristine natural ecosystem',
+			'green'        => 'lush vegetation and sustainable living',
+			'ocean'        => 'stunning seascape or marine scene',
+			'forest'       => 'serene woodland environment',
+			
+			// Real Estate/Property
+			'property'     => 'attractive modern real estate',
+			'house'        => 'beautiful residential home exterior',
+			'apartment'    => 'stylish modern apartment interior',
+			'real estate'  => 'impressive property and architecture',
+			'rent'         => 'welcoming living space',
+			
+			// Relationships/Family
+			'family'       => 'warm family togetherness moment',
+			'relationship' => 'meaningful human connection',
+			'parenting'    => 'nurturing parent-child interaction',
+			'wedding'      => 'romantic celebration atmosphere',
+			
+			// Productivity/Work
+			'productivity' => 'organized efficient workspace',
+			'tips'         => 'helpful tools and resources arranged neatly',
+			'guide'        => 'clear pathway and direction concept',
+			'how to'       => 'step-by-step process visualization',
+			'best'         => 'excellence and quality concept',
+			'top'          => 'achievement and success pinnacle',
+		);
+
+		$title_lower = strtolower( $title );
+		$visual_elements = array();
+
+		// Find matching visual concepts
+		foreach ( $visual_mappings as $keyword => $visual ) {
+			if ( strpos( $title_lower, $keyword ) !== false ) {
+				$visual_elements[] = $visual;
+			}
+		}
+
+		// If we found specific mappings, use them
+		if ( ! empty( $visual_elements ) ) {
+			return implode( ', combined with ', array_slice( $visual_elements, 0, 2 ) );
+		}
+
+		// Fallback: use the title itself but emphasize visual representation
+		return "the concept of: " . $title . " - shown through relevant objects, environments, and visual metaphors";
 	}
 
 	/**

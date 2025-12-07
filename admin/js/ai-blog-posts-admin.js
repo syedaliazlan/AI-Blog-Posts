@@ -54,8 +54,8 @@
 
 			// Topics
 			$('#add-topic-form').on('submit', this.addTopic.bind(this));
-			$('.delete-topic').on('click', this.deleteTopic.bind(this));
-			$('.generate-topic').on('click', this.generateFromTopic.bind(this));
+			$(document).on('click', '.delete-topic', this.deleteTopic.bind(this));
+			$(document).on('click', '.generate-topic, .retry-topic', this.generateFromTopic.bind(this));
 			$('#fetch-trending').on('click', this.fetchTrending.bind(this));
 			$('#add-selected-trends').on('click', this.addSelectedTrends.bind(this));
 			$('#select-all-topics').on('change', this.toggleAllTopics);
@@ -127,9 +127,9 @@
 			
 			const $button = $('#verify-api-key');
 			const $status = $('#api-key-status');
-			const apiKey = $('#api_key').val();
+			const apiKey = $('#api_key').val().trim();
 
-			if (!apiKey || apiKey.indexOf('•') === 0) {
+			if (!apiKey) {
 				$status.html('<span class="status-warning">Please enter an API key.</span>');
 				return;
 			}
@@ -147,8 +147,7 @@
 				success: function(response) {
 					if (response.success) {
 						$status.html('<span class="status-success"><span class="dashicons dashicons-yes-alt"></span> ' + response.data.message + '</span>');
-						// Mask the API key
-						$('#api_key').val('••••••••••••••••••••');
+						// Key is saved - show success but keep the key visible
 					} else {
 						$status.html('<span class="status-error"><span class="dashicons dashicons-warning"></span> ' + response.data.message + '</span>');
 					}
@@ -214,10 +213,6 @@
 				} else if ($input.attr('multiple')) {
 					settings[name] = $input.val() || [];
 				} else {
-					// Skip masked API key
-					if (name === 'api_key' && $input.val().indexOf('•') === 0) {
-						return;
-					}
 					settings[name] = $input.val();
 				}
 			});
@@ -484,19 +479,42 @@
 		 */
 		generateFromTopic: function(e) {
 			e.preventDefault();
+			e.stopPropagation();
 			
-			const $link = $(e.target);
+			// Get the clicked link - handle both direct click and child element click
+			let $link = $(e.target);
+			if (!$link.hasClass('generate-topic') && !$link.hasClass('retry-topic')) {
+				$link = $link.closest('.generate-topic, .retry-topic');
+			}
+			
+			if (!$link.length) return;
+			
 			const $row = $link.closest('tr');
 			const topicId = $link.data('id');
-			const topicText = $row.find('.column-topic strong').text();
+			const topicText = $row.find('.column-topic strong').text().trim();
+			const isRetry = $link.hasClass('retry-topic');
 			
-			if (!confirm('Generate a post for "' + topicText + '"?')) {
+			// Prevent double-clicks
+			if ($row.hasClass('generating')) {
+				return;
+			}
+			
+			if (!confirm((isRetry ? 'Retry generating' : 'Generate') + ' a post for "' + topicText + '"?')) {
 				return;
 			}
 
-			// Show generating state
-			$link.text('Generating...').css('pointer-events', 'none');
+			// Show generating state - replace all row actions with spinner
+			const $rowActions = $row.find('.row-actions');
+			$rowActions.html(
+				'<span class="generating-indicator">' +
+				'<span class="spinner is-active" style="float:none;margin:0 5px 0 0;visibility:visible;"></span>' +
+				'<span style="color:#0073aa;font-weight:500;">Generating...</span>' +
+				'</span>'
+			);
 			$row.addClass('generating');
+			
+			// Update status badge to "Generating"
+			$row.find('.column-status').html('<span class="status-badge generating">Generating</span>');
 
 			// Use AJAX to generate and update queue status
 			$.ajax({
@@ -509,36 +527,59 @@
 					topic_id: topicId
 				},
 				success: function(response) {
+					$row.removeClass('generating');
+					
 					if (response.success) {
-						$row.removeClass('generating').addClass('generated');
-						$row.find('.column-status').html('<span class="status-badge status-completed">Completed</span>');
-						$link.closest('.generate').remove();
+						$row.addClass('generated');
+						// Update status to Completed
+						$row.find('.column-status').html('<span class="status-badge completed">Completed</span>');
 						
-						// Show success message
-						alert('Post generated successfully!\n\nTitle: ' + (response.data.title || topicText) + '\n\nYou can edit it now.');
-						
-						// Optionally redirect to edit the post
-						if (response.data.edit_url && confirm('Do you want to edit the post now?')) {
-							window.location.href = response.data.edit_url;
-						} else {
-							location.reload();
+						// Update row actions with View Post and Edit links
+						let newActions = '';
+						if (response.data.post_url) {
+							newActions += '<span class="view"><a href="' + response.data.post_url + '" target="_blank">View Post</a> | </span>';
 						}
+						if (response.data.edit_url) {
+							newActions += '<span class="edit"><a href="' + response.data.edit_url + '">Edit</a> | </span>';
+						}
+						newActions += '<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>';
+						$rowActions.html(newActions);
+						
 					} else {
-						$row.removeClass('generating').addClass('generation-failed');
-						$row.find('.column-status').html('<span class="status-badge status-failed">Failed</span>');
-						$link.text('Retry').css('pointer-events', 'auto');
-						alert('Error: ' + response.data.message);
+						$row.addClass('generation-failed');
+						const errorMsg = response.data.message || 'Unknown error';
+						// Update status to Failed with error tooltip
+						$row.find('.column-status').html(
+							'<span class="status-badge failed">Failed</span> ' +
+							'<span class="error-tooltip" title="' + AIBlogPosts.escapeHtml(errorMsg) + '">' +
+							'<span class="dashicons dashicons-info"></span></span>'
+						);
+						// Show Retry and Delete buttons
+						$rowActions.html(
+							'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
+							'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
+						);
 					}
 				},
 				error: function(xhr, status) {
 					$row.removeClass('generating').addClass('generation-failed');
-					$link.text('Retry').css('pointer-events', 'auto');
 					
-					let errorMsg = 'Connection error.';
+					let errorMsg = 'Connection error';
 					if (status === 'timeout') {
 						errorMsg = 'Generation timed out. Please try again.';
 					}
-					alert(errorMsg);
+					
+					// Update status to Failed
+					$row.find('.column-status').html(
+						'<span class="status-badge failed">Failed</span> ' +
+						'<span class="error-tooltip" title="' + AIBlogPosts.escapeHtml(errorMsg) + '">' +
+						'<span class="dashicons dashicons-info"></span></span>'
+					);
+					// Show Retry and Delete buttons
+					$rowActions.html(
+						'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
+						'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
+					);
 				}
 			});
 		},

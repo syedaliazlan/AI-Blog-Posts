@@ -188,6 +188,17 @@ $status_counts = array(
 												<?php esc_html_e( 'Generate', 'ai-blog-posts' ); ?>
 											</a> |
 										</span>
+									<?php elseif ( 'failed' === $topic->status ) : ?>
+										<span class="retry">
+											<a href="#" class="retry-topic" data-id="<?php echo esc_attr( $topic->id ); ?>">
+												<?php esc_html_e( 'Retry', 'ai-blog-posts' ); ?>
+											</a> |
+										</span>
+									<?php elseif ( 'generating' === $topic->status ) : ?>
+										<span class="generating-text">
+											<span class="spinner is-active" style="float: none; margin: 0;"></span>
+											<?php esc_html_e( 'Generating...', 'ai-blog-posts' ); ?>
+										</span>
 									<?php endif; ?>
 									<?php if ( $topic->post_id ) : ?>
 										<span class="view">
@@ -195,12 +206,19 @@ $status_counts = array(
 												<?php esc_html_e( 'View Post', 'ai-blog-posts' ); ?>
 											</a> |
 										</span>
+										<span class="edit">
+											<a href="<?php echo esc_url( get_edit_post_link( $topic->post_id ) ); ?>">
+												<?php esc_html_e( 'Edit', 'ai-blog-posts' ); ?>
+											</a> |
+										</span>
 									<?php endif; ?>
+									<?php if ( 'generating' !== $topic->status ) : ?>
 									<span class="delete">
 										<a href="#" class="delete-topic" data-id="<?php echo esc_attr( $topic->id ); ?>">
 											<?php esc_html_e( 'Delete', 'ai-blog-posts' ); ?>
 										</a>
 									</span>
+									<?php endif; ?>
 								</div>
 							</td>
 							<td class="column-keywords">

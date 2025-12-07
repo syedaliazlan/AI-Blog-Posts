@@ -622,9 +622,11 @@ class Ai_Blog_Posts_Admin {
 		);
 
 		wp_send_json_success( array(
-			'message' => __( 'Post generated successfully.', 'ai-blog-posts' ),
-			'post_id' => $result['post_id'],
+			'message'  => __( 'Post generated successfully.', 'ai-blog-posts' ),
+			'post_id'  => $result['post_id'],
+			'title'    => get_the_title( $result['post_id'] ),
 			'edit_url' => get_edit_post_link( $result['post_id'], 'raw' ),
+			'post_url' => get_permalink( $result['post_id'] ),
 		) );
 	}
 

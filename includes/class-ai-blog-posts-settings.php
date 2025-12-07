@@ -36,7 +36,7 @@ class Ai_Blog_Posts_Settings {
 	 */
 	private static $settings = array(
 		'api_key' => array(
-			'type'      => 'encrypted',
+			'type'      => 'string',
 			'default'   => '',
 			'sanitize'  => 'sanitize_text_field',
 		),
@@ -266,18 +266,11 @@ class Ai_Blog_Posts_Settings {
 	 * @param    bool $mask_sensitive    Whether to mask sensitive data.
 	 * @return   array                   All settings.
 	 */
-	public static function get_all( $mask_sensitive = true ) {
+	public static function get_all( $mask_sensitive = false ) {
 		$all = array();
 
 		foreach ( array_keys( self::$settings ) as $key ) {
-			$value = self::get( $key );
-
-			// Mask sensitive values
-			if ( $mask_sensitive && 'encrypted' === self::$settings[ $key ]['type'] ) {
-				$value = Ai_Blog_Posts_Encryption::mask( $value );
-			}
-
-			$all[ $key ] = $value;
+			$all[ $key ] = self::get( $key );
 		}
 
 		return $all;

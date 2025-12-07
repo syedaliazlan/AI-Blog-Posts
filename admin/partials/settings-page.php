@@ -84,9 +84,9 @@ $rankmath_active = class_exists( 'RankMath' );
 										   name="api_key" 
 										   class="regular-text" 
 										   placeholder="sk-..."
-										   value="<?php echo esc_attr( Ai_Blog_Posts_Settings::is_configured() ? '••••••••••••••••••••' : '' ); ?>"
+										   value="<?php echo esc_attr( $settings['api_key'] ); ?>"
 										   autocomplete="off">
-									<button type="button" id="toggle-api-key" class="button">
+									<button type="button" id="toggle-api-key" class="button" title="<?php esc_attr_e( 'Show/Hide API Key', 'ai-blog-posts' ); ?>">
 										<span class="dashicons dashicons-visibility"></span>
 									</button>
 									<button type="button" id="verify-api-key" class="button button-secondary">
