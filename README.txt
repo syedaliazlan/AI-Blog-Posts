@@ -27,7 +27,8 @@ AI Blog Posts is a powerful WordPress plugin that leverages OpenAI's advanced la
 
 **AI Models**
 
-* Support for latest GPT-5.1, GPT-5 Mini, GPT-5 Nano, GPT-5 Pro, GPT-4.1, GPT-4o models
+* Support for latest GPT-5.1, GPT-5, GPT-5 Mini, GPT-5 Nano, GPT-5 Pro
+* GPT-4.1 and GPT-4.1 Mini for reliable content generation
 * GPT Image 1 and GPT Image 1 Mini for state-of-the-art image generation
 * Legacy DALL-E 3 support
 * Automatic model pricing calculation and cost tracking
@@ -41,8 +42,8 @@ AI Blog Posts is a powerful WordPress plugin that leverages OpenAI's advanced la
 
 **SEO Integration**
 
-* Auto-generate meta descriptions, focus keywords, and SEO titles
-* Seamless integration with Yoast SEO, RankMath, and All In One SEO Pack
+* Auto-generate meta descriptions and focus keywords
+* Seamless integration with Yoast SEO and RankMath
 * SEO-optimized content structure and heading hierarchy
 
 **Website Analysis**
@@ -98,9 +99,9 @@ Yes! Configure the scheduling options in Settings → Scheduling. You can set fr
 
 The plugin includes a multi-level "humanization" feature that rewrites content to sound more natural. Higher levels significantly reduce AI-detectable patterns.
 
-= Does it work with popular SEO plugins? =
+= Does it work with Yoast SEO or RankMath? =
 
-Yes! The plugin automatically detects and integrates with Yoast SEO, RankMath, and All In One SEO Pack. It populates meta descriptions, focus keywords, and SEO titles automatically.
+Yes! The plugin automatically detects your SEO plugin and populates meta descriptions, focus keywords, and SEO titles.
 
 = What happens if I hit my budget limit? =
 
@@ -118,14 +119,12 @@ Auto-posting will automatically pause, and you'll receive an email notification.
 
 = 1.0.0 =
 * Initial release
-* GPT-5.1, GPT-5 Mini, GPT-5 Nano, GPT-5 Pro, GPT-4.1, GPT-4o support
+* GPT-5.1, GPT-5, GPT-5 Mini, GPT-5 Nano, GPT-5 Pro, GPT-4.1, GPT-4.1 Mini support
 * GPT Image 1 and DALL-E 3 featured image generation
-* Yoast SEO, RankMath, and All In One SEO Pack integration
+* Yoast SEO and RankMath integration
 * Scheduled posting with topic queue
-* CSV import for bulk topic upload
 * Google Trends integration
 * Website style analysis
-* Step-by-step generation with retry logic
 * Comprehensive cost tracking
 * Budget limits and alerts
 

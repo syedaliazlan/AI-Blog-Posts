@@ -1011,7 +1011,7 @@ class Ai_Blog_Posts_Admin {
 		$diagnostics['server_software'] = isset( $_SERVER['SERVER_SOFTWARE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) : 'Unknown';
 
 		// Check if loopback connections work
-		// A successful loopback means the server can reach itself - any HTTP response (even 400) indicates connectivity
+		// A successful loopback means the server can reach itself - any HTTP response indicates connectivity
 		$diagnostics['loopback_working'] = false;
 		$loopback_test = wp_remote_get( admin_url( 'admin-ajax.php' ), array( 'timeout' => 10 ) );
 		if ( ! is_wp_error( $loopback_test ) ) {

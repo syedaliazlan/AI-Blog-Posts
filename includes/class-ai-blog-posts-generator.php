@@ -277,20 +277,6 @@ class Ai_Blog_Posts_Generator {
 			return $result;
 		}
 
-		// Validate that critical steps didn't return empty content
-		if ( in_array( $step, array( 'outline', 'content' ), true ) && empty( $result ) ) {
-			$error_msg = sprintf(
-				/* translators: %s: step name */
-				__( 'The %s step returned empty content. This usually indicates an API issue. Please check your API key and try again.', 'ai-blog-posts' ),
-				$step
-			);
-			$this->update_job( $job_id, array( 
-				'status' => 'error',
-				'error'  => $error_msg,
-			) );
-			return new WP_Error( 'empty_result', $error_msg );
-		}
-
 		// Update job with results
 		$job = $this->get_job( $job_id );
 		if ( ! $job ) {
@@ -954,51 +940,14 @@ class Ai_Blog_Posts_Generator {
 		// Parse JSON response
 		$json_content = $result['content'];
 		
-		// Extract JSON from response - handle nested structures properly
-		// Find the first { and last } to get the complete JSON object
-		$start = strpos( $json_content, '{' );
-		$end = strrpos( $json_content, '}' );
-		
-		if ( $start !== false && $end !== false && $end > $start ) {
-			$json_content = substr( $json_content, $start, $end - $start + 1 );
+		// Extract JSON from response (in case there's extra text)
+		if ( preg_match( '/\{[^}]+\}/', $json_content, $matches ) ) {
+			$json_content = $matches[0];
 		}
 
 		$seo_data = json_decode( $json_content, true );
 
-		// If JSON parsing failed, try to extract data manually
-		if ( ! is_array( $seo_data ) || empty( $seo_data ) ) {
-			$seo_data = $this->extract_seo_data_fallback( $result['content'] );
-		}
-
 		return is_array( $seo_data ) ? $seo_data : array();
-	}
-
-	/**
-	 * Fallback method to extract SEO data if JSON parsing fails.
-	 *
-	 * @since    1.0.0
-	 * @param    string $content    The AI response content.
-	 * @return   array              SEO data.
-	 */
-	private function extract_seo_data_fallback( $content ) {
-		$seo_data = array();
-
-		// Try to extract meta_description
-		if ( preg_match( '/meta[_\s]?description["\s:]+["\'`]?([^"\'`\n]{50,200})["\'`]?/i', $content, $matches ) ) {
-			$seo_data['meta_description'] = trim( $matches[1] );
-		}
-
-		// Try to extract focus_keyword
-		if ( preg_match( '/focus[_\s]?keyword["\s:]+["\'`]?([^"\'`\n,]{2,50})["\'`]?/i', $content, $matches ) ) {
-			$seo_data['focus_keyword'] = trim( $matches[1] );
-		}
-
-		// Try to extract seo_title
-		if ( preg_match( '/seo[_\s]?title["\s:]+["\'`]?([^"\'`\n]{10,70})["\'`]?/i', $content, $matches ) ) {
-			$seo_data['seo_title'] = trim( $matches[1] );
-		}
-
-		return $seo_data;
 	}
 
 	/**

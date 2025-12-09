@@ -49,7 +49,7 @@ class Ai_Blog_Posts_Settings {
 			'type'      => 'string',
 			'default'   => 'gpt-5-mini',
 			'sanitize'  => 'sanitize_text_field',
-			'options'   => array( 'gpt-5.1', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-pro', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini' ),
+			'options'   => array( 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-pro', 'gpt-4.1', 'gpt-4.1-mini' ),
 		),
 		'image_enabled' => array(
 			'type'      => 'bool',
@@ -59,13 +59,13 @@ class Ai_Blog_Posts_Settings {
 			'type'      => 'string',
 			'default'   => 'gpt-image-1',
 			'sanitize'  => 'sanitize_text_field',
-			'options'   => array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3' ),
+			'options'   => array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3', 'dall-e-2' ),
 		),
 		'image_size' => array(
 			'type'      => 'string',
-			'default'   => '1792x1024',
+			'default'   => '1536x1024',
 			'sanitize'  => 'sanitize_text_field',
-			'options'   => array( '1024x1024', '1792x1024', '1024x1792' ),
+			'options'   => array( '1024x1024', '1536x1024', '1024x1536', '1792x1024', '1024x1792' ),
 		),
 		'schedule_enabled' => array(
 			'type'      => 'bool',
@@ -183,13 +183,12 @@ class Ai_Blog_Posts_Settings {
 			$value = Ai_Blog_Posts_Encryption::decrypt( $value );
 		}
 
-		// Validate model setting - ensure it's a valid model
+		// Validate model setting - auto-correct invalid models
 		if ( 'model' === $key && ! empty( $value ) ) {
 			$valid_models = self::get_models();
 			if ( ! isset( $valid_models[ $value ] ) ) {
-				// Invalid model stored, return default
+				// Invalid model stored (e.g., fictional gpt-5-mini), reset to default
 				$value = $setting['default'];
-				// Auto-fix the stored value
 				update_option( self::PREFIX . $key, $value );
 			}
 		}
@@ -319,10 +318,18 @@ class Ai_Blog_Posts_Settings {
 			// GPT-5 Series (Latest - December 2025)
 			'gpt-5.1' => array(
 				'name'             => 'GPT-5.1',
-				'description'      => 'Best for coding & agentic tasks - configurable reasoning',
+				'description'      => 'Flagship model for coding and agentic tasks',
 				'input_cost'       => 1.25,  // per 1M tokens
 				'output_cost'      => 10.00, // per 1M tokens
-				'context_window'   => 1000000,
+				'context_window'   => 400000,
+				'recommended'      => true,
+			),
+			'gpt-5' => array(
+				'name'             => 'GPT-5',
+				'description'      => 'Main GPT-5 model - excellent for all tasks',
+				'input_cost'       => 1.25,
+				'output_cost'      => 10.00,
+				'context_window'   => 400000,
 				'recommended'      => true,
 			),
 			'gpt-5-mini' => array(
@@ -330,48 +337,39 @@ class Ai_Blog_Posts_Settings {
 				'description'      => 'Fast & cost-efficient - great for blog writing',
 				'input_cost'       => 0.25,
 				'output_cost'      => 2.00,
-				'context_window'   => 1000000,
+				'context_window'   => 400000,
 				'recommended'      => true,
 			),
 			'gpt-5-nano' => array(
 				'name'             => 'GPT-5 Nano',
-				'description'      => 'Fastest, most cost-efficient - good for simple tasks',
+				'description'      => 'Fastest, most cost-efficient - simple tasks',
 				'input_cost'       => 0.05,
 				'output_cost'      => 0.40,
-				'context_window'   => 1000000,
+				'context_window'   => 400000,
 				'recommended'      => false,
 			),
 			'gpt-5-pro' => array(
 				'name'             => 'GPT-5 Pro',
-				'description'      => 'Smarter, more precise - premium quality content',
+				'description'      => 'Premium reasoning - best for complex analysis',
 				'input_cost'       => 15.00,
 				'output_cost'      => 120.00,
-				'context_window'   => 1000000,
+				'context_window'   => 400000,
 				'recommended'      => false,
 			),
-			// GPT-4.1 (Smartest non-reasoning)
+			// GPT-4.1 Series
 			'gpt-4.1' => array(
 				'name'             => 'GPT-4.1',
-				'description'      => 'Smartest non-reasoning model - excellent quality',
+				'description'      => 'Excellent quality - good for most tasks',
 				'input_cost'       => 2.00,
 				'output_cost'      => 8.00,
 				'context_window'   => 128000,
 				'recommended'      => false,
 			),
-			// Legacy Models (still available)
-			'gpt-4o' => array(
-				'name'             => 'GPT-4o',
-				'description'      => 'Previous flagship - still excellent for most tasks',
-				'input_cost'       => 2.50,
-				'output_cost'      => 10.00,
-				'context_window'   => 128000,
-				'recommended'      => false,
-			),
-			'gpt-4o-mini' => array(
-				'name'             => 'GPT-4o Mini',
-				'description'      => 'Previous best value - reliable for blog content',
-				'input_cost'       => 0.15,
-				'output_cost'      => 0.60,
+			'gpt-4.1-mini' => array(
+				'name'             => 'GPT-4.1 Mini',
+				'description'      => 'Efficient GPT-4.1 - good balance',
+				'input_cost'       => 0.40,
+				'output_cost'      => 1.60,
 				'context_window'   => 128000,
 				'recommended'      => false,
 			),
@@ -390,29 +388,36 @@ class Ai_Blog_Posts_Settings {
 				'name'        => 'GPT Image 1',
 				'description' => 'State-of-the-art image generation - best quality',
 				'pricing'     => array(
-					'1024x1024'  => 0.040,
-					'1536x1024'  => 0.080,
-					'1024x1536'  => 0.080,
-					'auto'       => 0.040,
+					'1024x1024'  => 0.042, // Medium quality
+					'1024x1536'  => 0.063,
+					'1536x1024'  => 0.063,
 				),
 			),
 			'gpt-image-1-mini' => array(
 				'name'        => 'GPT Image 1 Mini',
 				'description' => 'Cost-efficient image generation',
 				'pricing'     => array(
-					'1024x1024'  => 0.020,
-					'1536x1024'  => 0.040,
-					'1024x1536'  => 0.040,
-					'auto'       => 0.020,
+					'1024x1024' => 0.011,
+					'1024x1536' => 0.015,
+					'1536x1024' => 0.015,
 				),
 			),
 			'dall-e-3' => array(
-				'name'        => 'DALL-E 3 (Legacy)',
-				'description' => 'Previous generation - being deprecated',
+				'name'        => 'DALL-E 3',
+				'description' => 'High quality image generation',
 				'pricing'     => array(
 					'1024x1024'  => 0.040,
 					'1792x1024'  => 0.080,
 					'1024x1792'  => 0.080,
+				),
+			),
+			'dall-e-2' => array(
+				'name'        => 'DALL-E 2',
+				'description' => 'Legacy model, most affordable',
+				'pricing'     => array(
+					'1024x1024' => 0.020,
+					'512x512'   => 0.018,
+					'256x256'   => 0.016,
 				),
 			),
 		);

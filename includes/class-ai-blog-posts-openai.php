@@ -157,11 +157,19 @@ class Ai_Blog_Posts_OpenAI {
 
 		// Check if model supports system messages (o1/reasoning models don't)
 		$is_reasoning_model = $this->is_reasoning_model( $model );
+		// GPT-5 models use "developer" role instead of "system" role
+		$is_gpt5_model = strpos( $model, 'gpt-5' ) === 0;
 		
 		if ( ! empty( $system_prompt ) ) {
 			if ( $is_reasoning_model ) {
 				// For reasoning models, prepend system prompt to user message
 				$prompt = "Instructions: " . $system_prompt . "\n\n" . $prompt;
+			} elseif ( $is_gpt5_model ) {
+				// GPT-5 models use "developer" role instead of "system"
+				$messages[] = array(
+					'role'    => 'developer',
+					'content' => $system_prompt,
+				);
 			} else {
 				$messages[] = array(
 					'role'    => 'system',
@@ -181,16 +189,27 @@ class Ai_Blog_Posts_OpenAI {
 			'messages' => $messages,
 		);
 
-		// Use max_completion_tokens for newer models, max_tokens for legacy
-		if ( $this->uses_max_completion_tokens( $model ) ) {
+		// GPT-5 models use reasoning tokens internally - we need much higher token limits
+		// The model uses tokens for internal chain-of-thought before generating output
+		if ( $is_gpt5_model ) {
+			// Triple the requested tokens to ensure enough for reasoning + output
+			$body['max_completion_tokens'] = $max_tokens * 3;
+		} elseif ( $this->uses_max_completion_tokens( $model ) ) {
+			// Use max_completion_tokens for newer models
 			$body['max_completion_tokens'] = $max_tokens;
 		} else {
+			// Legacy models use max_tokens
 			$body['max_tokens'] = $max_tokens;
 		}
 
 		// Only add temperature for models that support it
 		if ( $this->supports_temperature( $model ) ) {
 			$body['temperature'] = $temperature;
+		}
+
+		// Log request for debugging
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( sprintf( 'AI Blog Posts: Making request to /chat/completions with model: %s', $model ) );
 		}
 
 		$start_time = microtime( true );
@@ -202,6 +221,9 @@ class Ai_Blog_Posts_OpenAI {
 		}
 
 		if ( isset( $response['error'] ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'AI Blog Posts: API error: %s', wp_json_encode( $response['error'] ) ) );
+			}
 			return new WP_Error(
 				'openai_error',
 				$response['error']['message'] ?? __( 'Unknown API error.', 'ai-blog-posts' )
@@ -210,6 +232,16 @@ class Ai_Blog_Posts_OpenAI {
 
 		$usage = $response['usage'] ?? array();
 		$content = $response['choices'][0]['message']['content'] ?? '';
+
+		// Log response details for debugging empty responses
+		if ( empty( $content ) && defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( sprintf( 
+				'AI Blog Posts: Empty content from API. Model: %s, Finish reason: %s, Response: %s',
+				$model,
+				$response['choices'][0]['finish_reason'] ?? 'unknown',
+				wp_json_encode( $response )
+			) );
+		}
 
 		// Calculate cost
 		$cost = $this->calculate_text_cost(
@@ -238,14 +270,13 @@ class Ai_Blog_Posts_OpenAI {
 	 * @return   bool             True if uses max_completion_tokens.
 	 */
 	private function uses_max_completion_tokens( $model ) {
-		// GPT-5.x, GPT-4.1.x, GPT-4o, and reasoning models use max_completion_tokens parameter
+		// GPT-5.x, GPT-4.1.x, GPT-4o, and reasoning models use max_completion_tokens
 		$new_model_prefixes = array(
 			'gpt-5',    // GPT-5, GPT-5.1, GPT-5-mini, GPT-5-nano, GPT-5-pro
 			'gpt-4.1',  // GPT-4.1, GPT-4.1-mini
-			'gpt-4o',   // GPT-4o, GPT-4o-mini
+			'gpt-4o',   // GPT-4o, GPT-4o-mini (legacy)
 			'o1',       // o1, o1-mini, o1-pro
 			'o3',       // o3, o3-mini
-			'o4',       // o4-mini
 		);
 
 		foreach ( $new_model_prefixes as $prefix ) {
@@ -286,7 +317,7 @@ class Ai_Blog_Posts_OpenAI {
 	 */
 	private function supports_temperature( $model ) {
 		// GPT-5 series and reasoning models only support default temperature (1)
-		$no_temp_prefixes = array( 'gpt-5', 'o1', 'o3', 'o4' );
+		$no_temp_prefixes = array( 'gpt-5', 'o1', 'o3' );
 
 		foreach ( $no_temp_prefixes as $prefix ) {
 			if ( strpos( $model, $prefix ) === 0 ) {
@@ -308,7 +339,7 @@ class Ai_Blog_Posts_OpenAI {
 	public function generate_image( $prompt, $options = array() ) {
 		$model = $options['model'] ?? Ai_Blog_Posts_Settings::get( 'image_model' );
 		$size = $options['size'] ?? Ai_Blog_Posts_Settings::get( 'image_size' );
-		$quality = $options['quality'] ?? 'hd';
+		$quality = $options['quality'] ?? 'standard';
 		$style = $options['style'] ?? 'natural';
 
 		$body = array(
@@ -322,7 +353,9 @@ class Ai_Blog_Posts_OpenAI {
 		// GPT Image 1 and DALL-E 3 support quality and style options
 		if ( in_array( $model, array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3' ), true ) ) {
 			$body['quality'] = $quality;
-			$body['style'] = $style;
+			if ( 'dall-e-3' === $model ) {
+				$body['style'] = $style;
+			}
 		}
 
 		$start_time = microtime( true );
@@ -656,9 +689,13 @@ class Ai_Blog_Posts_OpenAI {
 
 		$pricing = $models[ $model ]['pricing'];
 
-		// HD quality doubles the price for GPT Image 1 and DALL-E 3
-		$hd_models = array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3' );
-		$multiplier = ( in_array( $model, $hd_models, true ) && 'hd' === $quality ) ? 2 : 1;
+		// HD/High quality increases price for GPT Image 1 and DALL-E 3
+		$multiplier = 1;
+		if ( in_array( $model, array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3' ), true ) ) {
+			if ( in_array( $quality, array( 'hd', 'high' ), true ) ) {
+				$multiplier = 2;
+			}
+		}
 
 		return isset( $pricing[ $size ] ) ? $pricing[ $size ] * $multiplier : 0.0;
 	}
@@ -674,7 +711,7 @@ class Ai_Blog_Posts_OpenAI {
 		// Include GPT-5, GPT-4, and image models
 		$relevant_prefixes = array(
 			'gpt-5',      // GPT-5.x series
-			'gpt-4',      // GPT-4.x series (including 4o, 4.1, 4-turbo)
+			'gpt-4',      // GPT-4.x series (4.1, 4o, 4-turbo)
 			'gpt-image',  // GPT Image 1, GPT Image 1 mini
 			'dall-e',     // Legacy image models
 		);

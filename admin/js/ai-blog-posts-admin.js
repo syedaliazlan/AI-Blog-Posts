@@ -256,8 +256,8 @@
 			'humanize': { index: 2, label: 'Humanizing text...' },
 			'seo': { index: 3, label: 'Optimizing for SEO...' },
 			'finalize': { index: 4, label: 'Creating post...' },
-			'image': { index: 4, label: 'Generating image...' },
-			'complete': { index: 5, label: 'Complete!' }
+			'image': { index: 5, label: 'Generating image...' },
+			'complete': { index: 6, label: 'Complete!' }
 		},
 
 		/**
@@ -443,19 +443,19 @@
 		 * Show generation complete
 		 */
 		showGenerationComplete: function(data) {
-			// Complete all steps
-			$('.progress-step').removeClass('active').addClass('complete');
-			$('#progress-fill').css('width', '100%');
-			$('#progress-status').text('Complete!');
+						// Complete all steps
+						$('.progress-step').removeClass('active').addClass('complete');
+						$('#progress-fill').css('width', '100%');
+						$('#progress-status').text('Complete!');
 
 			const $progress = $('#generation-progress');
 			const $content = $('#preview-content');
 
-			setTimeout(function() {
-				$progress.hide();
-				$content.show();
+						setTimeout(function() {
+							$progress.hide();
+							$content.show();
 
-				// Populate preview
+							// Populate preview
 				$('#result-model').text(data.model || 'N/A');
 				$('#result-tokens').text((data.tokens || 0).toLocaleString());
 				$('#result-cost').text((data.cost_usd || 0).toFixed(4));
@@ -464,7 +464,7 @@
 				$('#preview-body').html(data.content_preview || '');
 				$('#edit-post-btn').attr('href', data.edit_url || '#');
 				$('#view-post-btn').attr('href', data.view_url || '#');
-			}, 1000);
+						}, 1000);
 		},
 
 		/**
@@ -754,33 +754,33 @@
 		 */
 		handleTopicGenerationSuccess: function(data, topicId, $row, $rowActions) {
 			$row.removeClass('generating').addClass('generated');
-			$row.find('.column-status').html('<span class="status-badge completed">Completed</span>');
-			
-			let newActions = '';
+						$row.find('.column-status').html('<span class="status-badge completed">Completed</span>');
+						
+						let newActions = '';
 			if (data.view_url || data.post_url) {
 				newActions += '<span class="view"><a href="' + (data.view_url || data.post_url) + '" target="_blank">View Post</a> | </span>';
-			}
+						}
 			if (data.edit_url) {
 				newActions += '<span class="edit"><a href="' + data.edit_url + '">Edit</a> | </span>';
-			}
-			newActions += '<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>';
-			$rowActions.html(newActions);
+						}
+						newActions += '<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>';
+						$rowActions.html(newActions);
 		},
 
 		/**
 		 * Handle topic generation error
 		 */
 		handleTopicGenerationError: function(errorMsg, topicId, $row, $rowActions) {
-			$row.removeClass('generating').addClass('generation-failed');
-			$row.find('.column-status').html(
-				'<span class="status-badge failed">Failed</span> ' +
+					$row.removeClass('generating').addClass('generation-failed');
+					$row.find('.column-status').html(
+						'<span class="status-badge failed">Failed</span> ' +
 				'<span class="error-tooltip" title="' + this.escapeHtml(errorMsg) + '">' +
-				'<span class="dashicons dashicons-info"></span></span>'
-			);
-			$rowActions.html(
-				'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
-				'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
-			);
+						'<span class="dashicons dashicons-info"></span></span>'
+					);
+					$rowActions.html(
+						'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
+						'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
+					);
 		},
 
 		/**

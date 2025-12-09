@@ -41,20 +41,10 @@ class Ai_Blog_Posts_SEO {
 	}
 
 	/**
-	 * Check if All In One SEO is active.
-	 *
-	 * @since    1.0.0
-	 * @return   bool
-	 */
-	public function is_aioseo_active() {
-		return defined( 'AIOSEO_VERSION' ) || class_exists( 'AIOSEO\\Plugin\\AIOSEO' );
-	}
-
-	/**
 	 * Get the active SEO plugin.
 	 *
 	 * @since    1.0.0
-	 * @return   string|null    'yoast', 'rankmath', 'aioseo', or null.
+	 * @return   string|null    'yoast', 'rankmath', or null.
 	 */
 	public function get_active_plugin() {
 		if ( $this->is_yoast_active() ) {
@@ -62,9 +52,6 @@ class Ai_Blog_Posts_SEO {
 		}
 		if ( $this->is_rankmath_active() ) {
 			return 'rankmath';
-		}
-		if ( $this->is_aioseo_active() ) {
-			return 'aioseo';
 		}
 		return null;
 	}
@@ -79,14 +66,6 @@ class Ai_Blog_Posts_SEO {
 	 */
 	public function set_post_meta( $post_id, $seo_data ) {
 		if ( empty( $seo_data ) || ! Ai_Blog_Posts_Settings::get( 'seo_enabled' ) ) {
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				error_log( sprintf(
-					'AI Blog Posts SEO: Skipped for post %d - data_empty=%s, seo_enabled=%s',
-					$post_id,
-					empty( $seo_data ) ? 'yes' : 'no',
-					Ai_Blog_Posts_Settings::get( 'seo_enabled' ) ? 'yes' : 'no'
-				) );
-			}
 			return false;
 		}
 
@@ -96,25 +75,12 @@ class Ai_Blog_Posts_SEO {
 
 		$plugin = $this->get_active_plugin();
 
-		// Log for debugging
-		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-			error_log( sprintf(
-				'AI Blog Posts SEO: Post %d - Plugin: %s, Data: %s',
-				$post_id,
-				$plugin ?? 'none',
-				wp_json_encode( $seo_data )
-			) );
-		}
-
 		switch ( $plugin ) {
 			case 'yoast':
 				return $this->set_yoast_meta( $post_id, $meta_description, $focus_keyword, $seo_title );
 			
 			case 'rankmath':
 				return $this->set_rankmath_meta( $post_id, $meta_description, $focus_keyword, $seo_title );
-			
-			case 'aioseo':
-				return $this->set_aioseo_meta( $post_id, $meta_description, $focus_keyword, $seo_title );
 			
 			default:
 				// Store as custom post meta for themes that might use it
@@ -133,49 +99,25 @@ class Ai_Blog_Posts_SEO {
 	 * @return   bool                     Success status.
 	 */
 	private function set_yoast_meta( $post_id, $meta_description, $focus_keyword, $seo_title ) {
-		$updated = false;
+		$success = true;
 
-		if ( ! empty( $meta_description ) ) {
-			// Delete first to ensure fresh value, then add
-			delete_post_meta( $post_id, '_yoast_wpseo_metadesc' );
-			$result = update_post_meta( $post_id, '_yoast_wpseo_metadesc', sanitize_text_field( $meta_description ) );
-			if ( $result !== false ) {
-				$updated = true;
-			}
+		if ( $meta_description ) {
+			$success = $success && update_post_meta( $post_id, '_yoast_wpseo_metadesc', $meta_description );
 		}
 
-		if ( ! empty( $focus_keyword ) ) {
-			delete_post_meta( $post_id, '_yoast_wpseo_focuskw' );
-			$result = update_post_meta( $post_id, '_yoast_wpseo_focuskw', sanitize_text_field( $focus_keyword ) );
-			if ( $result !== false ) {
-				$updated = true;
-			}
+		if ( $focus_keyword ) {
+			$success = $success && update_post_meta( $post_id, '_yoast_wpseo_focuskw', $focus_keyword );
 		}
 
-		if ( ! empty( $seo_title ) ) {
-			delete_post_meta( $post_id, '_yoast_wpseo_title' );
-			$result = update_post_meta( $post_id, '_yoast_wpseo_title', sanitize_text_field( $seo_title ) );
-			if ( $result !== false ) {
-				$updated = true;
-			}
+		if ( $seo_title ) {
+			$success = $success && update_post_meta( $post_id, '_yoast_wpseo_title', $seo_title );
 		}
 
 		// Set additional Yoast meta for better integration
 		update_post_meta( $post_id, '_yoast_wpseo_content_score', 0 ); // Will be recalculated by Yoast
 		update_post_meta( $post_id, '_yoast_wpseo_estimated-reading-time-minutes', 0 );
 
-		// Log for debugging if WP_DEBUG is enabled
-		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-			error_log( sprintf(
-				'AI Blog Posts SEO: Post %d - Yoast meta set: desc=%s, keyword=%s, title=%s',
-				$post_id,
-				! empty( $meta_description ) ? 'yes' : 'no',
-				! empty( $focus_keyword ) ? 'yes' : 'no',
-				! empty( $seo_title ) ? 'yes' : 'no'
-			) );
-		}
-
-		return $updated;
+		return $success;
 	}
 
 	/**
@@ -189,96 +131,24 @@ class Ai_Blog_Posts_SEO {
 	 * @return   bool                     Success status.
 	 */
 	private function set_rankmath_meta( $post_id, $meta_description, $focus_keyword, $seo_title ) {
-		$updated = false;
+		$success = true;
 
-		if ( ! empty( $meta_description ) ) {
-			delete_post_meta( $post_id, 'rank_math_description' );
-			$result = update_post_meta( $post_id, 'rank_math_description', sanitize_text_field( $meta_description ) );
-			if ( $result !== false ) {
-				$updated = true;
-			}
+		if ( $meta_description ) {
+			$success = $success && update_post_meta( $post_id, 'rank_math_description', $meta_description );
 		}
 
-		if ( ! empty( $focus_keyword ) ) {
-			delete_post_meta( $post_id, 'rank_math_focus_keyword' );
-			$result = update_post_meta( $post_id, 'rank_math_focus_keyword', sanitize_text_field( $focus_keyword ) );
-			if ( $result !== false ) {
-				$updated = true;
-			}
+		if ( $focus_keyword ) {
+			$success = $success && update_post_meta( $post_id, 'rank_math_focus_keyword', $focus_keyword );
 		}
 
-		if ( ! empty( $seo_title ) ) {
-			delete_post_meta( $post_id, 'rank_math_title' );
-			$result = update_post_meta( $post_id, 'rank_math_title', sanitize_text_field( $seo_title ) );
-			if ( $result !== false ) {
-				$updated = true;
-			}
+
+		if ( $seo_title ) {
+			$success = $success && update_post_meta( $post_id, 'rank_math_title', $seo_title );
 		}
 
 		// Set additional RankMath meta
 		update_post_meta( $post_id, 'rank_math_seo_score', 0 ); // Will be recalculated
 		update_post_meta( $post_id, 'rank_math_robots', array( 'index' ) );
-
-		return $updated;
-	}
-
-	/**
-	 * Set All In One SEO meta.
-	 *
-	 * @since    1.0.0
-	 * @param    int    $post_id          Post ID.
-	 * @param    string $meta_description Meta description.
-	 * @param    string $focus_keyword    Focus keyword.
-	 * @param    string $seo_title        SEO title.
-	 * @return   bool                     Success status.
-	 */
-	private function set_aioseo_meta( $post_id, $meta_description, $focus_keyword, $seo_title ) {
-		$success = true;
-
-		// AIOSEO stores data in a custom table, but also supports post meta for compatibility
-		// The post meta approach works for both AIOSEO Lite and Pro
-		
-		if ( $meta_description ) {
-			$success = $success && update_post_meta( $post_id, '_aioseo_description', $meta_description );
-		}
-
-		if ( $focus_keyword ) {
-			// AIOSEO stores focus keyphrase in a JSON format within _aioseo_keywords
-			$keyphrases = array(
-				'focus' => array(
-					'keyphrase' => $focus_keyword,
-				),
-			);
-			$success = $success && update_post_meta( $post_id, '_aioseo_keywords', wp_json_encode( $keyphrases ) );
-		}
-
-		if ( $seo_title ) {
-			$success = $success && update_post_meta( $post_id, '_aioseo_title', $seo_title );
-		}
-
-		// Try to use AIOSEO's API if available (for proper database storage)
-		if ( function_exists( 'aioseo' ) && method_exists( aioseo()->meta, 'savePostMeta' ) ) {
-			$aioseo_data = array();
-			if ( $seo_title ) {
-				$aioseo_data['title'] = $seo_title;
-			}
-			if ( $meta_description ) {
-				$aioseo_data['description'] = $meta_description;
-			}
-			if ( $focus_keyword ) {
-				$aioseo_data['keyphrases'] = array(
-					'focus' => array( 'keyphrase' => $focus_keyword ),
-				);
-			}
-			
-			if ( ! empty( $aioseo_data ) ) {
-				try {
-					aioseo()->meta->savePostMeta( $post_id, $aioseo_data );
-				} catch ( Exception $e ) {
-					// Fallback to post meta already set above
-				}
-			}
-		}
 
 		return $success;
 	}
@@ -334,19 +204,6 @@ class Ai_Blog_Posts_SEO {
 					'meta_description' => get_post_meta( $post_id, 'rank_math_description', true ),
 					'focus_keyword'    => get_post_meta( $post_id, 'rank_math_focus_keyword', true ),
 					'seo_title'        => get_post_meta( $post_id, 'rank_math_title', true ),
-				);
-			
-			case 'aioseo':
-				$focus_keyword = '';
-				$keywords_json = get_post_meta( $post_id, '_aioseo_keywords', true );
-				if ( $keywords_json ) {
-					$keywords = json_decode( $keywords_json, true );
-					$focus_keyword = $keywords['focus']['keyphrase'] ?? '';
-				}
-				return array(
-					'meta_description' => get_post_meta( $post_id, '_aioseo_description', true ),
-					'focus_keyword'    => $focus_keyword,
-					'seo_title'        => get_post_meta( $post_id, '_aioseo_title', true ),
 				);
 			
 			default:
@@ -410,8 +267,6 @@ class Ai_Blog_Posts_SEO {
 				return defined( 'WPSEO_VERSION' ) ? WPSEO_VERSION : '';
 			case 'rankmath':
 				return defined( 'RANK_MATH_VERSION' ) ? RANK_MATH_VERSION : '';
-			case 'aioseo':
-				return defined( 'AIOSEO_VERSION' ) ? AIOSEO_VERSION : '';
 			default:
 				return '';
 		}
