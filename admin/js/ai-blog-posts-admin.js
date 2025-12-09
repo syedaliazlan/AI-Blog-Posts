@@ -70,6 +70,9 @@
 			$('#bulk-import').on('click', function() { $('#csv-import-modal').show(); });
 			$('.modal-close, .modal-cancel').on('click', function() { $(this).closest('.ai-blog-posts-modal').hide(); });
 
+			// CSV Import
+			$('#do-csv-import').on('click', this.importCsv.bind(this));
+
 			// Website analysis (both quick and AI-powered buttons)
 			$('#analyze-website, #analyze-website-ai').on('click', this.analyzeWebsite.bind(this));
 
@@ -245,7 +248,20 @@
 		},
 
 		/**
-		 * Generate post
+		 * Generation step mapping
+		 */
+		generationSteps: {
+			'outline': { index: 0, label: 'Creating outline...' },
+			'content': { index: 1, label: 'Writing content...' },
+			'humanize': { index: 2, label: 'Humanizing text...' },
+			'seo': { index: 3, label: 'Optimizing for SEO...' },
+			'finalize': { index: 4, label: 'Creating post...' },
+			'image': { index: 4, label: 'Generating image...' },
+			'complete': { index: 5, label: 'Complete!' }
+		},
+
+		/**
+		 * Generate post using step-by-step process
 		 */
 		generatePost: function(e) {
 			e.preventDefault();
@@ -255,6 +271,7 @@
 			const $progress = $('#generation-progress');
 			const $content = $('#preview-content');
 			const $error = $('#preview-error');
+			const self = this;
 
 			// Show preview container
 			$preview.show();
@@ -265,25 +282,11 @@
 			// Reset progress
 			$('.progress-step').removeClass('active complete');
 			$('#progress-fill').css('width', '0%');
-
-			// Start progress animation
-			const steps = ['outline', 'content', 'humanize', 'seo', 'image', 'complete'];
-			let currentStep = 0;
-
-			const progressInterval = setInterval(function() {
-				if (currentStep < steps.length - 1) {
-					$('.progress-step[data-step="' + steps[currentStep] + '"]').removeClass('active').addClass('complete');
-					currentStep++;
-					$('.progress-step[data-step="' + steps[currentStep] + '"]').addClass('active');
-					$('#progress-fill').css('width', ((currentStep + 1) / steps.length * 100) + '%');
-					$('#progress-status').text('Step ' + (currentStep + 1) + ' of ' + steps.length + '...');
-				}
-			}, 3000);
+			$('#progress-status').text('Starting generation...');
+			$('.progress-step[data-step="outline"]').addClass('active');
 
 			// Collect form data
-			const data = {
-				action: 'ai_blog_posts_generate_post',
-				nonce: aiBlogPosts.nonce,
+			const formData = {
 				topic: $('#topic').val(),
 				keywords: $('#keywords').val(),
 				additional_instructions: $('#additional_instructions').val(),
@@ -296,46 +299,174 @@
 			// Include queue topic ID if generating from queue
 			const queueTopicId = $('#queue_topic_id').val();
 			if (queueTopicId) {
-				data.queue_topic_id = queueTopicId;
+				formData.queue_topic_id = queueTopicId;
 			}
 
+			// Start step-by-step generation
+			this.startStepByStepGeneration(formData);
+		},
+
+		/**
+		 * Start step-by-step generation process
+		 */
+		startStepByStepGeneration: function(formData) {
+			const self = this;
+
+			// Step 1: Create the job
 			$.ajax({
 				url: aiBlogPosts.ajaxUrl,
 				type: 'POST',
-				data: data,
-				timeout: 300000, // 5 minutes
+				timeout: 30000, // 30 seconds for job creation
+				data: {
+					action: 'ai_blog_posts_start_generation',
+					nonce: aiBlogPosts.nonce,
+					topic: formData.topic,
+					keywords: formData.keywords,
+					category_id: formData.category_id,
+					publish: formData.post_status === 'publish' ? 'true' : 'false',
+					generate_image: formData.generate_image,
+					queue_topic_id: formData.queue_topic_id || 0
+				},
 				success: function(response) {
-					clearInterval(progressInterval);
-					
 					if (response.success) {
-						// Complete all steps
-						$('.progress-step').removeClass('active').addClass('complete');
-						$('#progress-fill').css('width', '100%');
-						$('#progress-status').text('Complete!');
-
-						setTimeout(function() {
-							$progress.hide();
-							$content.show();
-
-							// Populate preview
-							$('#result-model').text(response.data.model);
-							$('#result-tokens').text(response.data.tokens.toLocaleString());
-							$('#result-cost').text(response.data.cost_usd.toFixed(4));
-							$('#result-time').text(response.data.generation_time);
-							$('#preview-title-text').text(response.data.title);
-							$('#preview-body').html(response.data.content_preview);
-							$('#edit-post-btn').attr('href', response.data.edit_url);
-							$('#view-post-btn').attr('href', response.data.view_url);
-						}, 1000);
+						// Start processing steps
+						self.processNextStep(response.data.job_id, response.data.next_step, formData);
 					} else {
-						AIBlogPosts.showError(response.data.message);
+						self.showError(response.data.message || 'Failed to start generation.');
 					}
 				},
 				error: function(xhr, status, error) {
-					clearInterval(progressInterval);
-					AIBlogPosts.showError('Request failed: ' + (error || 'Unknown error'));
+					let errorMsg = 'Connection error. Please check your internet connection and try again.';
+					if (status === 'timeout') {
+						errorMsg = 'Request timed out. Please try again.';
+					}
+					self.showError(errorMsg);
 				}
 			});
+		},
+
+		/**
+		 * Process the next generation step
+		 */
+		processNextStep: function(jobId, step, formData, retryCount) {
+			const self = this;
+			retryCount = retryCount || 0;
+			const maxRetries = 2;
+
+			// Update progress UI
+			const stepInfo = this.generationSteps[step];
+			if (stepInfo) {
+				$('#progress-status').text(stepInfo.label);
+				const progress = ((stepInfo.index + 1) / 6) * 100;
+				$('#progress-fill').css('width', progress + '%');
+
+				// Mark previous steps as complete
+				const allSteps = ['outline', 'content', 'humanize', 'seo', 'image', 'complete'];
+				allSteps.forEach(function(s, idx) {
+					const $step = $('.progress-step[data-step="' + s + '"]');
+					if (idx < stepInfo.index) {
+						$step.removeClass('active').addClass('complete');
+					} else if (idx === stepInfo.index) {
+						$step.removeClass('complete').addClass('active');
+					} else {
+						$step.removeClass('active complete');
+					}
+				});
+			}
+
+			// Process the step
+			$.ajax({
+				url: aiBlogPosts.ajaxUrl,
+				type: 'POST',
+				timeout: 120000, // 2 minutes per step
+				data: {
+					action: 'ai_blog_posts_process_step',
+					nonce: aiBlogPosts.nonce,
+					job_id: jobId,
+					step: step
+				},
+				success: function(response) {
+					if (response.success) {
+						const data = response.data;
+
+						// Check if generation is complete
+						if (data.job_status === 'completed' || data.next_step === null) {
+							self.showGenerationComplete(data);
+						} else if (data.next_step) {
+							// Process next step
+							self.processNextStep(jobId, data.next_step, formData);
+						}
+					} else {
+						// Retry on certain errors
+						if (retryCount < maxRetries && self.isRetryableError(response.data.message)) {
+							console.log('Retrying step ' + step + ' (attempt ' + (retryCount + 2) + ')');
+							setTimeout(function() {
+								self.processNextStep(jobId, step, formData, retryCount + 1);
+							}, 2000);
+						} else {
+							self.showError(response.data.message || 'Generation failed at step: ' + step);
+						}
+					}
+				},
+				error: function(xhr, status, error) {
+					// Retry on timeout or connection errors
+					if (retryCount < maxRetries && (status === 'timeout' || status === 'error')) {
+						console.log('Retrying step ' + step + ' after error (attempt ' + (retryCount + 2) + ')');
+						setTimeout(function() {
+							self.processNextStep(jobId, step, formData, retryCount + 1);
+						}, 3000);
+					} else {
+						let errorMsg = 'Connection error during ' + step + ' step. ';
+						if (status === 'timeout') {
+							errorMsg += 'The request timed out. Your server may have strict timeout limits.';
+						} else {
+							errorMsg += 'Please check your connection and try again.';
+						}
+						self.showError(errorMsg);
+					}
+				}
+			});
+		},
+
+		/**
+		 * Check if an error is retryable
+		 */
+		isRetryableError: function(message) {
+			if (!message) return false;
+			const retryablePatterns = [
+				'timeout', 'timed out', 'connection', 'temporarily',
+				'server error', 'rate limit', '429', '500', '502', '503', '504'
+			];
+			const msgLower = message.toLowerCase();
+			return retryablePatterns.some(pattern => msgLower.includes(pattern));
+		},
+
+		/**
+		 * Show generation complete
+		 */
+		showGenerationComplete: function(data) {
+			// Complete all steps
+			$('.progress-step').removeClass('active').addClass('complete');
+			$('#progress-fill').css('width', '100%');
+			$('#progress-status').text('Complete!');
+
+			const $progress = $('#generation-progress');
+			const $content = $('#preview-content');
+
+			setTimeout(function() {
+				$progress.hide();
+				$content.show();
+
+				// Populate preview
+				$('#result-model').text(data.model || 'N/A');
+				$('#result-tokens').text((data.tokens || 0).toLocaleString());
+				$('#result-cost').text((data.cost_usd || 0).toFixed(4));
+				$('#result-time').text(data.generation_time || 'N/A');
+				$('#preview-title-text').text(data.title || 'Untitled');
+				$('#preview-body').html(data.content_preview || '');
+				$('#edit-post-btn').attr('href', data.edit_url || '#');
+				$('#view-post-btn').attr('href', data.view_url || '#');
+			}, 1000);
 		},
 
 		/**
@@ -475,7 +606,7 @@
 		},
 
 		/**
-		 * Generate from topic (uses AJAX to update queue status)
+		 * Generate from topic using step-by-step process
 		 */
 		generateFromTopic: function(e) {
 			e.preventDefault();
@@ -493,6 +624,7 @@
 			const topicId = $link.data('id');
 			const topicText = $row.find('.column-topic strong').text().trim();
 			const isRetry = $link.hasClass('retry-topic');
+			const self = this;
 			
 			// Prevent double-clicks
 			if ($row.hasClass('generating')) {
@@ -508,7 +640,7 @@
 			$rowActions.html(
 				'<span class="generating-indicator">' +
 				'<span class="spinner is-active" style="float:none;margin:0 5px 0 0;visibility:visible;"></span>' +
-				'<span style="color:#0073aa;font-weight:500;">Generating...</span>' +
+				'<span class="step-status" style="color:#0073aa;font-weight:500;">Starting...</span>' +
 				'</span>'
 			);
 			$row.addClass('generating');
@@ -516,72 +648,141 @@
 			// Update status badge to "Generating"
 			$row.find('.column-status').html('<span class="status-badge generating">Generating</span>');
 
-			// Use AJAX to generate and update queue status
+			// Start step-by-step generation for this topic
+			this.generateTopicStepByStep(topicId, $row, $rowActions);
+		},
+
+		/**
+		 * Step-by-step generation for queue topics
+		 */
+		generateTopicStepByStep: function(topicId, $row, $rowActions) {
+			const self = this;
+
+			// Step 1: Start the generation job
 			$.ajax({
 				url: aiBlogPosts.ajaxUrl,
 				type: 'POST',
-				timeout: 300000, // 5 minutes
+				timeout: 30000,
 				data: {
 					action: 'ai_blog_posts_generate_from_queue',
 					nonce: aiBlogPosts.nonce,
-					topic_id: topicId
+					topic_id: topicId,
+					use_steps: true  // Signal to use step-by-step mode
 				},
 				success: function(response) {
-					$row.removeClass('generating');
-					
-					if (response.success) {
-						$row.addClass('generated');
-						// Update status to Completed
-						$row.find('.column-status').html('<span class="status-badge completed">Completed</span>');
-						
-						// Update row actions with View Post and Edit links
-						let newActions = '';
-						if (response.data.post_url) {
-							newActions += '<span class="view"><a href="' + response.data.post_url + '" target="_blank">View Post</a> | </span>';
-						}
-						if (response.data.edit_url) {
-							newActions += '<span class="edit"><a href="' + response.data.edit_url + '">Edit</a> | </span>';
-						}
-						newActions += '<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>';
-						$rowActions.html(newActions);
-						
+					if (response.success && response.data.job_id) {
+						// Process steps
+						self.processTopicStep(response.data.job_id, response.data.next_step, topicId, $row, $rowActions);
+					} else if (response.success) {
+						// Legacy single-request mode succeeded
+						self.handleTopicGenerationSuccess(response.data, topicId, $row, $rowActions);
 					} else {
-						$row.addClass('generation-failed');
-						const errorMsg = response.data.message || 'Unknown error';
-						// Update status to Failed with error tooltip
-						$row.find('.column-status').html(
-							'<span class="status-badge failed">Failed</span> ' +
-							'<span class="error-tooltip" title="' + AIBlogPosts.escapeHtml(errorMsg) + '">' +
-							'<span class="dashicons dashicons-info"></span></span>'
-						);
-						// Show Retry and Delete buttons
-						$rowActions.html(
-							'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
-							'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
-						);
+						self.handleTopicGenerationError(response.data.message || 'Unknown error', topicId, $row, $rowActions);
 					}
 				},
 				error: function(xhr, status) {
-					$row.removeClass('generating').addClass('generation-failed');
-					
 					let errorMsg = 'Connection error';
 					if (status === 'timeout') {
-						errorMsg = 'Generation timed out. Please try again.';
+						errorMsg = 'Request timed out. Please try again.';
 					}
-					
-					// Update status to Failed
-					$row.find('.column-status').html(
-						'<span class="status-badge failed">Failed</span> ' +
-						'<span class="error-tooltip" title="' + AIBlogPosts.escapeHtml(errorMsg) + '">' +
-						'<span class="dashicons dashicons-info"></span></span>'
-					);
-					// Show Retry and Delete buttons
-					$rowActions.html(
-						'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
-						'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
-					);
+					self.handleTopicGenerationError(errorMsg, topicId, $row, $rowActions);
 				}
 			});
+		},
+
+		/**
+		 * Process a single step for topic generation
+		 */
+		processTopicStep: function(jobId, step, topicId, $row, $rowActions, retryCount) {
+			const self = this;
+			retryCount = retryCount || 0;
+			const maxRetries = 2;
+
+			// Update status text
+			const stepLabels = {
+				'outline': 'Creating outline...',
+				'content': 'Writing content...',
+				'humanize': 'Humanizing...',
+				'seo': 'Optimizing SEO...',
+				'finalize': 'Creating post...',
+				'image': 'Generating image...'
+			};
+			$rowActions.find('.step-status').text(stepLabels[step] || 'Processing...');
+
+			$.ajax({
+				url: aiBlogPosts.ajaxUrl,
+				type: 'POST',
+				timeout: 120000, // 2 minutes per step
+				data: {
+					action: 'ai_blog_posts_process_step',
+					nonce: aiBlogPosts.nonce,
+					job_id: jobId,
+					step: step
+				},
+				success: function(response) {
+					if (response.success) {
+						const data = response.data;
+
+						if (data.job_status === 'completed' || data.next_step === null) {
+							self.handleTopicGenerationSuccess(data, topicId, $row, $rowActions);
+						} else if (data.next_step) {
+							self.processTopicStep(jobId, data.next_step, topicId, $row, $rowActions);
+						}
+					} else {
+						if (retryCount < maxRetries && self.isRetryableError(response.data.message)) {
+							setTimeout(function() {
+								self.processTopicStep(jobId, step, topicId, $row, $rowActions, retryCount + 1);
+							}, 2000);
+						} else {
+							self.handleTopicGenerationError(response.data.message, topicId, $row, $rowActions);
+						}
+					}
+				},
+				error: function(xhr, status) {
+					if (retryCount < maxRetries) {
+						setTimeout(function() {
+							self.processTopicStep(jobId, step, topicId, $row, $rowActions, retryCount + 1);
+						}, 3000);
+					} else {
+						let errorMsg = status === 'timeout' ? 'Request timed out' : 'Connection error';
+						self.handleTopicGenerationError(errorMsg, topicId, $row, $rowActions);
+					}
+				}
+			});
+		},
+
+		/**
+		 * Handle successful topic generation
+		 */
+		handleTopicGenerationSuccess: function(data, topicId, $row, $rowActions) {
+			$row.removeClass('generating').addClass('generated');
+			$row.find('.column-status').html('<span class="status-badge completed">Completed</span>');
+			
+			let newActions = '';
+			if (data.view_url || data.post_url) {
+				newActions += '<span class="view"><a href="' + (data.view_url || data.post_url) + '" target="_blank">View Post</a> | </span>';
+			}
+			if (data.edit_url) {
+				newActions += '<span class="edit"><a href="' + data.edit_url + '">Edit</a> | </span>';
+			}
+			newActions += '<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>';
+			$rowActions.html(newActions);
+		},
+
+		/**
+		 * Handle topic generation error
+		 */
+		handleTopicGenerationError: function(errorMsg, topicId, $row, $rowActions) {
+			$row.removeClass('generating').addClass('generation-failed');
+			$row.find('.column-status').html(
+				'<span class="status-badge failed">Failed</span> ' +
+				'<span class="error-tooltip" title="' + this.escapeHtml(errorMsg) + '">' +
+				'<span class="dashicons dashicons-info"></span></span>'
+			);
+			$rowActions.html(
+				'<span class="retry"><a href="#" class="retry-topic" data-id="' + topicId + '">Retry</a> | </span>' +
+				'<span class="delete"><a href="#" class="delete-topic" data-id="' + topicId + '">Delete</a></span>'
+			);
 		},
 
 		/**
@@ -871,6 +1072,172 @@
 					}
 				});
 			});
+		},
+
+		/**
+		 * Import topics from CSV file
+		 */
+		importCsv: function(e) {
+			e.preventDefault();
+
+			const $button = $('#do-csv-import');
+			const $fileInput = $('#csv-file');
+			const $modal = $('#csv-import-modal');
+			const file = $fileInput[0].files[0];
+
+			if (!file) {
+				alert('Please select a CSV file.');
+				return;
+			}
+
+			// Check file size (2MB max)
+			if (file.size > 2 * 1024 * 1024) {
+				alert('File size exceeds 2MB limit.');
+				return;
+			}
+
+			$button.prop('disabled', true).text('Importing...');
+
+			// Read and parse CSV
+			const reader = new FileReader();
+			reader.onload = function(event) {
+				const csvContent = event.target.result;
+				const rows = AIBlogPosts.parseCsv(csvContent);
+
+				if (rows.length < 2) {
+					alert('CSV file is empty or has no data rows.');
+					$button.prop('disabled', false).text('Import');
+					return;
+				}
+
+				// Get header row (normalize to lowercase)
+				const headers = rows[0].map(h => h.toLowerCase().trim());
+				
+				// Find column indices
+				const topicIdx = headers.indexOf('topic');
+				const keywordsIdx = headers.indexOf('keywords');
+				const categoryIdx = headers.indexOf('category');
+				const priorityIdx = headers.indexOf('priority');
+
+				if (topicIdx === -1) {
+					alert('CSV must have a "Topic" column.');
+					$button.prop('disabled', false).text('Import');
+					return;
+				}
+
+				// Prepare topics data
+				const topics = [];
+				for (let i = 1; i < rows.length; i++) {
+					const row = rows[i];
+					if (!row[topicIdx] || !row[topicIdx].trim()) continue;
+
+					topics.push({
+						topic: row[topicIdx] ? row[topicIdx].trim() : '',
+						keywords: keywordsIdx !== -1 && row[keywordsIdx] ? row[keywordsIdx].trim() : '',
+						category: categoryIdx !== -1 && row[categoryIdx] ? row[categoryIdx].trim() : '',
+						priority: priorityIdx !== -1 && row[priorityIdx] ? parseInt(row[priorityIdx], 10) || 0 : 0
+					});
+				}
+
+				if (topics.length === 0) {
+					alert('No valid topics found in CSV.');
+					$button.prop('disabled', false).text('Import');
+					return;
+				}
+
+				// Send to server
+				$.ajax({
+					url: aiBlogPosts.ajaxUrl,
+					type: 'POST',
+					data: {
+						action: 'ai_blog_posts_import_csv',
+						nonce: aiBlogPosts.nonce,
+						topics: JSON.stringify(topics)
+					},
+					success: function(response) {
+						if (response.success) {
+							alert(response.data.message);
+							$modal.hide();
+							location.reload();
+						} else {
+							alert('Error: ' + response.data.message);
+						}
+					},
+					error: function() {
+						alert('Connection error. Please try again.');
+					},
+					complete: function() {
+						$button.prop('disabled', false).text('Import');
+					}
+				});
+			};
+
+			reader.onerror = function() {
+				alert('Error reading file.');
+				$button.prop('disabled', false).text('Import');
+			};
+
+			reader.readAsText(file);
+		},
+
+		/**
+		 * Parse CSV content into rows
+		 */
+		parseCsv: function(content) {
+			const rows = [];
+			let currentRow = [];
+			let currentField = '';
+			let inQuotes = false;
+
+			for (let i = 0; i < content.length; i++) {
+				const char = content[i];
+				const nextChar = content[i + 1];
+
+				if (inQuotes) {
+					if (char === '"' && nextChar === '"') {
+						// Escaped quote
+						currentField += '"';
+						i++;
+					} else if (char === '"') {
+						// End of quoted field
+						inQuotes = false;
+					} else {
+						currentField += char;
+					}
+				} else {
+					if (char === '"') {
+						// Start of quoted field
+						inQuotes = true;
+					} else if (char === ',') {
+						// Field separator
+						currentRow.push(currentField);
+						currentField = '';
+					} else if (char === '\r' && nextChar === '\n') {
+						// Windows line ending
+						currentRow.push(currentField);
+						rows.push(currentRow);
+						currentRow = [];
+						currentField = '';
+						i++;
+					} else if (char === '\n' || char === '\r') {
+						// Unix or old Mac line ending
+						currentRow.push(currentField);
+						rows.push(currentRow);
+						currentRow = [];
+						currentField = '';
+					} else {
+						currentField += char;
+					}
+				}
+			}
+
+			// Handle last field/row
+			if (currentField || currentRow.length > 0) {
+				currentRow.push(currentField);
+				rows.push(currentRow);
+			}
+
+			return rows;
 		},
 
 		/**

@@ -85,6 +85,437 @@ class Ai_Blog_Posts_Generator {
 	}
 
 	/**
+	 * Create a new generation job for step-by-step processing.
+	 *
+	 * @since    1.0.0
+	 * @param    string $topic      The topic to write about.
+	 * @param    array  $options    Generation options.
+	 * @return   string|WP_Error    Job ID or error.
+	 */
+	public function create_job( $topic, $options = array() ) {
+		// Check if API is configured
+		if ( ! Ai_Blog_Posts_Settings::is_configured() ) {
+			return new WP_Error( 
+				'api_not_configured', 
+				__( 'OpenAI API key is not configured. Please add your API key in Settings.', 'ai-blog-posts' ) 
+			);
+		}
+
+		// Parse options
+		$defaults = array(
+			'keywords'       => '',
+			'category_id'    => 0,
+			'publish'        => false,
+			'source'         => 'manual',
+			'instructions'   => '',
+			'model'          => Ai_Blog_Posts_Settings::get( 'model' ),
+			'generate_image' => Ai_Blog_Posts_Settings::get( 'image_enabled' ),
+			'queue_topic_id' => 0,
+		);
+		$options = wp_parse_args( $options, $defaults );
+
+		// Create unique job ID
+		$job_id = 'aibp_' . wp_generate_uuid4();
+
+		// Initialize job state
+		$job_state = array(
+			'job_id'         => $job_id,
+			'topic'          => $topic,
+			'options'        => $options,
+			'status'         => 'pending',
+			'current_step'   => 'outline',
+			'steps_completed'=> array(),
+			'start_time'     => microtime( true ),
+			'token_usage'    => array(
+				'prompt_tokens'     => 0,
+				'completion_tokens' => 0,
+				'total_tokens'      => 0,
+				'cost_usd'          => 0,
+			),
+			'data'           => array(),  // Stores outline, content, etc.
+			'error'          => null,
+			'post_id'        => null,
+		);
+
+		// Store job state (1 hour expiry)
+		set_transient( $job_id, $job_state, HOUR_IN_SECONDS );
+
+		return $job_id;
+	}
+
+	/**
+	 * Get job state.
+	 *
+	 * @since    1.0.0
+	 * @param    string $job_id    Job ID.
+	 * @return   array|false       Job state or false if not found.
+	 */
+	public function get_job( $job_id ) {
+		return get_transient( $job_id );
+	}
+
+	/**
+	 * Update job state.
+	 *
+	 * @since    1.0.0
+	 * @param    string $job_id    Job ID.
+	 * @param    array  $updates   Updates to merge into job state.
+	 * @return   bool              Success.
+	 */
+	private function update_job( $job_id, $updates ) {
+		$job = $this->get_job( $job_id );
+		if ( ! $job ) {
+			return false;
+		}
+		$job = array_merge( $job, $updates );
+		return set_transient( $job_id, $job, HOUR_IN_SECONDS );
+	}
+
+	/**
+	 * Process a single step of the generation.
+	 *
+	 * @since    1.0.0
+	 * @param    string $job_id    Job ID.
+	 * @param    string $step      Step to process (outline, content, humanize, seo, image, finalize).
+	 * @return   array|WP_Error    Result with next_step or error.
+	 */
+	public function process_step( $job_id, $step ) {
+		$job = $this->get_job( $job_id );
+		
+		if ( ! $job ) {
+			return new WP_Error( 'job_not_found', __( 'Generation job not found or expired.', 'ai-blog-posts' ) );
+		}
+
+		// Update status
+		$this->update_job( $job_id, array( 
+			'status' => 'processing',
+			'current_step' => $step,
+		) );
+
+		// Initialize token tracking for this step
+		$this->token_usage = $job['token_usage'];
+
+		$result = null;
+		$next_step = null;
+		$data_key = null;
+
+		try {
+			switch ( $step ) {
+				case 'outline':
+					$result = $this->generate_outline( $job['topic'], $job['options'] );
+					$data_key = 'outline';
+					$next_step = 'content';
+					break;
+
+				case 'content':
+					if ( empty( $job['data']['outline'] ) ) {
+						return new WP_Error( 'missing_outline', __( 'Outline not generated yet.', 'ai-blog-posts' ) );
+					}
+					$result = $this->generate_content( $job['topic'], $job['data']['outline'], $job['options'] );
+					$data_key = 'content';
+					$next_step = 'humanize';
+					break;
+
+				case 'humanize':
+					if ( empty( $job['data']['content'] ) ) {
+						return new WP_Error( 'missing_content', __( 'Content not generated yet.', 'ai-blog-posts' ) );
+					}
+					$result = $this->humanize_content( $job['data']['content'], $job['options'] );
+					// If humanization fails, use original content
+					if ( is_wp_error( $result ) ) {
+						$result = $job['data']['content'];
+					}
+					$data_key = 'humanized';
+					$next_step = Ai_Blog_Posts_Settings::get( 'seo_enabled' ) ? 'seo' : 'finalize';
+					break;
+
+				case 'seo':
+					$content = $job['data']['humanized'] ?? $job['data']['content'];
+					if ( empty( $content ) ) {
+						return new WP_Error( 'missing_content', __( 'Content not generated yet.', 'ai-blog-posts' ) );
+					}
+					$result = $this->generate_seo_meta( $job['topic'], $content, $job['options'] );
+					// SEO is optional, don't fail if it errors
+					if ( is_wp_error( $result ) ) {
+						$result = array();
+					}
+					$data_key = 'seo_data';
+					$next_step = 'finalize';
+					break;
+
+				case 'finalize':
+					return $this->finalize_job( $job_id );
+
+				case 'image':
+					// Image is processed after post creation
+					if ( empty( $job['post_id'] ) ) {
+						return new WP_Error( 'missing_post', __( 'Post not created yet.', 'ai-blog-posts' ) );
+					}
+					$content = $job['data']['humanized'] ?? $job['data']['content'];
+					$title = $this->extract_title( $job['topic'], $job['data']['outline'] );
+					$result = $this->generate_featured_image( $job['post_id'], $job['topic'], $title );
+					$data_key = 'image_result';
+					$next_step = 'complete';
+					break;
+
+				default:
+					return new WP_Error( 'invalid_step', __( 'Invalid generation step.', 'ai-blog-posts' ) );
+			}
+		} catch ( Exception $e ) {
+			$this->update_job( $job_id, array( 
+				'status' => 'error',
+				'error' => $e->getMessage(),
+			) );
+			return new WP_Error( 'generation_error', $e->getMessage() );
+		}
+
+		if ( is_wp_error( $result ) ) {
+			$this->update_job( $job_id, array( 
+				'status' => 'error',
+				'error' => $result->get_error_message(),
+			) );
+			return $result;
+		}
+
+		// Update job with results
+		$job = $this->get_job( $job_id );
+		if ( ! $job ) {
+			return new WP_Error( 'job_expired', __( 'Generation job expired during processing. Please try again.', 'ai-blog-posts' ) );
+		}
+		$job['data'][ $data_key ] = $result;
+		$job['steps_completed'][] = $step;
+		$job['token_usage'] = $this->token_usage;
+		$job['current_step'] = $next_step;
+		$job['status'] = 'in_progress';
+		set_transient( $job_id, $job, HOUR_IN_SECONDS );
+
+		return array(
+			'success'    => true,
+			'step'       => $step,
+			'next_step'  => $next_step,
+			'job_status' => 'in_progress',
+		);
+	}
+
+	/**
+	 * Finalize the job - create the post and set metadata.
+	 *
+	 * @since    1.0.0
+	 * @param    string $job_id    Job ID.
+	 * @return   array|WP_Error    Final result or error.
+	 */
+	private function finalize_job( $job_id ) {
+		$job = $this->get_job( $job_id );
+		
+		if ( ! $job ) {
+			return new WP_Error( 'job_not_found', __( 'Generation job not found.', 'ai-blog-posts' ) );
+		}
+
+		$content = $job['data']['humanized'] ?? $job['data']['content'];
+		if ( empty( $content ) ) {
+			return new WP_Error( 'missing_content', __( 'No content to publish.', 'ai-blog-posts' ) );
+		}
+
+		// Convert to Gutenberg blocks
+		$gutenberg_content = $this->convert_to_gutenberg( $content );
+		$outline = $job['data']['outline'] ?? '';
+		$title = $this->extract_title( $job['topic'], $outline );
+
+		// Create the post
+		$post_data = array(
+			'post_title'   => $title,
+			'post_content' => $gutenberg_content,
+			'post_status'  => $job['options']['publish'] ? 'publish' : Ai_Blog_Posts_Settings::get( 'post_status' ),
+			'post_author'  => Ai_Blog_Posts_Settings::get( 'default_author' ),
+			'post_type'    => 'post',
+		);
+
+		// Add category
+		if ( $job['options']['category_id'] ) {
+			$post_data['post_category'] = array( $job['options']['category_id'] );
+		} elseif ( ! empty( Ai_Blog_Posts_Settings::get( 'categories' ) ) ) {
+			$post_data['post_category'] = Ai_Blog_Posts_Settings::get( 'categories' );
+		}
+
+		$post_id = wp_insert_post( $post_data, true );
+
+		if ( is_wp_error( $post_id ) ) {
+			$this->update_job( $job_id, array( 
+				'status' => 'error',
+				'error' => $post_id->get_error_message(),
+			) );
+			return $post_id;
+		}
+
+		// Set SEO meta
+		$seo_data = $job['data']['seo_data'] ?? array();
+		if ( ! empty( $seo_data ) ) {
+			$this->seo->set_post_meta( $post_id, $seo_data );
+		}
+
+		// Generate and set tags
+		$tags = $this->generate_tags( $job['topic'], $job['options']['keywords'], $content );
+		if ( ! empty( $tags ) ) {
+			wp_set_post_tags( $post_id, $tags, false );
+		}
+
+		// Add post meta
+		update_post_meta( $post_id, '_ai_blog_posts_generated', true );
+		update_post_meta( $post_id, '_ai_blog_posts_topic', $job['topic'] );
+		update_post_meta( $post_id, '_ai_blog_posts_model', $job['options']['model'] );
+		update_post_meta( $post_id, '_ai_blog_posts_tokens', $job['token_usage']['total_tokens'] );
+		update_post_meta( $post_id, '_ai_blog_posts_cost', $job['token_usage']['cost_usd'] );
+
+		// Update job with post ID
+		$job['post_id'] = $post_id;
+		$job['steps_completed'][] = 'finalize';
+		
+		// Determine next step
+		$next_step = $job['options']['generate_image'] ? 'image' : 'complete';
+		$job['current_step'] = $next_step;
+		$job['status'] = $next_step === 'complete' ? 'completed' : 'in_progress';
+		
+		set_transient( $job_id, $job, HOUR_IN_SECONDS );
+
+		$generation_time = microtime( true ) - $job['start_time'];
+
+		// If no image needed, log and return final result
+		if ( $next_step === 'complete' ) {
+			$this->log_job_completion( $job, $generation_time );
+
+			// Update queue topic if applicable
+			if ( $job['options']['queue_topic_id'] ) {
+				$this->update_queue_topic( $job['options']['queue_topic_id'], $post_id );
+			}
+		}
+
+		return array(
+			'success'         => true,
+			'step'            => 'finalize',
+			'next_step'       => $next_step,
+			'job_status'      => $job['status'],
+			'post_id'         => $post_id,
+			'title'           => $title,
+			'edit_url'        => get_edit_post_link( $post_id, 'raw' ),
+			'view_url'        => get_permalink( $post_id ),
+			'model'           => $job['options']['model'],
+			'tokens'          => $job['token_usage']['total_tokens'],
+			'cost_usd'        => $job['token_usage']['cost_usd'],
+			'generation_time' => round( $generation_time, 2 ),
+			'content_preview' => wp_trim_words( wp_strip_all_tags( $content ), 100 ),
+		);
+	}
+
+	/**
+	 * Complete image step and finalize everything.
+	 *
+	 * @since    1.0.0
+	 * @param    string $job_id    Job ID.
+	 * @return   array|WP_Error    Final result.
+	 */
+	public function complete_with_image( $job_id ) {
+		$job = $this->get_job( $job_id );
+		
+		if ( ! $job || empty( $job['post_id'] ) ) {
+			return new WP_Error( 'job_not_found', __( 'Generation job not found.', 'ai-blog-posts' ) );
+		}
+
+		$generation_time = microtime( true ) - $job['start_time'];
+		$image_cost = 0;
+
+		// Get image cost if generated
+		if ( isset( $job['data']['image_result'] ) && ! is_wp_error( $job['data']['image_result'] ) ) {
+			$image_cost = $job['data']['image_result']['cost_usd'] ?? 0;
+		}
+
+		// Update post meta with image cost
+		$total_cost = $job['token_usage']['cost_usd'] + $image_cost;
+		update_post_meta( $job['post_id'], '_ai_blog_posts_cost', $total_cost );
+
+		// Log completion
+		$job['token_usage']['image_cost_usd'] = $image_cost;
+		$this->log_job_completion( $job, $generation_time );
+
+		// Update queue topic if applicable
+		if ( $job['options']['queue_topic_id'] ) {
+			$this->update_queue_topic( $job['options']['queue_topic_id'], $job['post_id'] );
+		}
+
+		// Mark job complete
+		$job['status'] = 'completed';
+		$job['steps_completed'][] = 'image';
+		$job['current_step'] = 'complete';
+		set_transient( $job_id, $job, HOUR_IN_SECONDS );
+
+		$content = $job['data']['humanized'] ?? $job['data']['content'] ?? '';
+		$outline = $job['data']['outline'] ?? '';
+		$title = $this->extract_title( $job['topic'], $outline );
+
+		return array(
+			'success'         => true,
+			'step'            => 'complete',
+			'next_step'       => null,
+			'job_status'      => 'completed',
+			'post_id'         => $job['post_id'],
+			'title'           => $title,
+			'edit_url'        => get_edit_post_link( $job['post_id'], 'raw' ),
+			'view_url'        => get_permalink( $job['post_id'] ),
+			'model'           => $job['options']['model'],
+			'tokens'          => $job['token_usage']['total_tokens'],
+			'cost_usd'        => $total_cost,
+			'generation_time' => round( $generation_time, 2 ),
+			'content_preview' => wp_trim_words( wp_strip_all_tags( $content ), 100 ),
+		);
+	}
+
+	/**
+	 * Log job completion to cost tracker.
+	 *
+	 * @since    1.0.0
+	 * @param    array $job              Job state.
+	 * @param    float $generation_time  Total generation time.
+	 */
+	private function log_job_completion( $job, $generation_time ) {
+		$image_cost = $job['token_usage']['image_cost_usd'] ?? 0;
+		
+		$this->cost_tracker->log( array(
+			'post_id'           => $job['post_id'],
+			'model_used'        => $job['options']['model'],
+			'prompt_tokens'     => $job['token_usage']['prompt_tokens'],
+			'completion_tokens' => $job['token_usage']['completion_tokens'],
+			'total_tokens'      => $job['token_usage']['total_tokens'],
+			'cost_usd'          => $job['token_usage']['cost_usd'],
+			'image_cost_usd'    => $image_cost,
+			'generation_time'   => $generation_time,
+			'topic_source'      => $job['options']['source'],
+			'status'            => 'success',
+		) );
+	}
+
+	/**
+	 * Update queue topic status after generation.
+	 *
+	 * @since    1.0.0
+	 * @param    int $topic_id    Topic ID.
+	 * @param    int $post_id     Created post ID.
+	 */
+	private function update_queue_topic( $topic_id, $post_id ) {
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_topics';
+		$wpdb->update(
+			$table,
+			array(
+				'status'       => 'completed',
+				'post_id'      => $post_id,
+				'processed_at' => current_time( 'mysql' ),
+			),
+			array( 'id' => $topic_id ),
+			array( '%s', '%d', '%s' ),
+			array( '%d' )
+		);
+	}
+
+	/**
 	 * Generate a complete blog post.
 	 *
 	 * @since    1.0.0
@@ -469,14 +900,51 @@ class Ai_Blog_Posts_Generator {
 		// Parse JSON response
 		$json_content = $result['content'];
 		
-		// Extract JSON from response (in case there's extra text)
-		if ( preg_match( '/\{[^}]+\}/', $json_content, $matches ) ) {
-			$json_content = $matches[0];
+		// Extract JSON from response - handle nested structures properly
+		// Find the first { and last } to get the complete JSON object
+		$start = strpos( $json_content, '{' );
+		$end = strrpos( $json_content, '}' );
+		
+		if ( $start !== false && $end !== false && $end > $start ) {
+			$json_content = substr( $json_content, $start, $end - $start + 1 );
 		}
 
 		$seo_data = json_decode( $json_content, true );
 
+		// If JSON parsing failed, try to extract data manually
+		if ( ! is_array( $seo_data ) || empty( $seo_data ) ) {
+			$seo_data = $this->extract_seo_data_fallback( $result['content'] );
+		}
+
 		return is_array( $seo_data ) ? $seo_data : array();
+	}
+
+	/**
+	 * Fallback method to extract SEO data if JSON parsing fails.
+	 *
+	 * @since    1.0.0
+	 * @param    string $content    The AI response content.
+	 * @return   array              SEO data.
+	 */
+	private function extract_seo_data_fallback( $content ) {
+		$seo_data = array();
+
+		// Try to extract meta_description
+		if ( preg_match( '/meta[_\s]?description["\s:]+["\'`]?([^"\'`\n]{50,200})["\'`]?/i', $content, $matches ) ) {
+			$seo_data['meta_description'] = trim( $matches[1] );
+		}
+
+		// Try to extract focus_keyword
+		if ( preg_match( '/focus[_\s]?keyword["\s:]+["\'`]?([^"\'`\n,]{2,50})["\'`]?/i', $content, $matches ) ) {
+			$seo_data['focus_keyword'] = trim( $matches[1] );
+		}
+
+		// Try to extract seo_title
+		if ( preg_match( '/seo[_\s]?title["\s:]+["\'`]?([^"\'`\n]{10,70})["\'`]?/i', $content, $matches ) ) {
+			$seo_data['seo_title'] = trim( $matches[1] );
+		}
+
+		return $seo_data;
 	}
 
 	/**

@@ -309,7 +309,13 @@ $status_counts = array(
 					<button type="button" class="modal-close">&times;</button>
 				</div>
 				<div class="modal-body">
-					<p><?php esc_html_e( 'Upload a CSV file with topics. Expected columns: topic, keywords, category, priority', 'ai-blog-posts' ); ?></p>
+					<p><?php esc_html_e( 'Upload a CSV file with topics. Expected columns:', 'ai-blog-posts' ); ?></p>
+					<ul style="margin: 10px 0 10px 20px; list-style: disc;">
+						<li><strong>Topic</strong> <?php esc_html_e( '(required)', 'ai-blog-posts' ); ?></li>
+						<li><strong>Keywords</strong> <?php esc_html_e( '(optional - comma-separated)', 'ai-blog-posts' ); ?></li>
+						<li><strong>Category</strong> <?php esc_html_e( '(optional - name or slug, will be auto-created if not found)', 'ai-blog-posts' ); ?></li>
+						<li><strong>Priority</strong> <?php esc_html_e( '(optional - 0-100)', 'ai-blog-posts' ); ?></li>
+					</ul>
 					<form id="csv-import-form" enctype="multipart/form-data">
 						<input type="file" id="csv-file" name="csv_file" accept=".csv" required>
 						<p class="description">

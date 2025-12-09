@@ -344,7 +344,156 @@ class Ai_Blog_Posts_Admin {
 	}
 
 	/**
-	 * AJAX handler: Generate post.
+	 * AJAX handler: Start step-by-step generation (create job).
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_start_generation() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$topic = isset( $_POST['topic'] ) ? sanitize_text_field( wp_unslash( $_POST['topic'] ) ) : '';
+		$keywords = isset( $_POST['keywords'] ) ? sanitize_text_field( wp_unslash( $_POST['keywords'] ) ) : '';
+		$category_id = isset( $_POST['category_id'] ) ? absint( $_POST['category_id'] ) : 0;
+		$publish = isset( $_POST['publish'] ) && 'true' === $_POST['publish'];
+		$queue_topic_id = isset( $_POST['queue_topic_id'] ) ? absint( $_POST['queue_topic_id'] ) : 0;
+		$generate_image = isset( $_POST['generate_image'] ) ? filter_var( $_POST['generate_image'], FILTER_VALIDATE_BOOLEAN ) : Ai_Blog_Posts_Settings::get( 'image_enabled' );
+
+		if ( empty( $topic ) ) {
+			wp_send_json_error( array( 'message' => __( 'Topic is required.', 'ai-blog-posts' ) ) );
+		}
+
+		// If generating from queue, update status to processing
+		if ( $queue_topic_id ) {
+			global $wpdb;
+			$table = $wpdb->prefix . 'ai_blog_posts_topics';
+			$wpdb->update(
+				$table,
+				array( 'status' => 'processing' ),
+				array( 'id' => $queue_topic_id ),
+				array( '%s' ),
+				array( '%d' )
+			);
+		}
+
+		$generator = new Ai_Blog_Posts_Generator();
+		$job_id = $generator->create_job( $topic, array(
+			'keywords'       => $keywords,
+			'category_id'    => $category_id,
+			'publish'        => $publish,
+			'source'         => $queue_topic_id ? 'queue' : 'manual',
+			'generate_image' => $generate_image,
+			'queue_topic_id' => $queue_topic_id,
+		) );
+
+		if ( is_wp_error( $job_id ) ) {
+			wp_send_json_error( array( 'message' => $job_id->get_error_message() ) );
+		}
+
+		wp_send_json_success( array(
+			'job_id'     => $job_id,
+			'next_step'  => 'outline',
+			'message'    => __( 'Generation started.', 'ai-blog-posts' ),
+		) );
+	}
+
+	/**
+	 * AJAX handler: Process a generation step.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_process_step() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_text_field( wp_unslash( $_POST['job_id'] ) ) : '';
+		$step = isset( $_POST['step'] ) ? sanitize_text_field( wp_unslash( $_POST['step'] ) ) : '';
+
+		if ( empty( $job_id ) || empty( $step ) ) {
+			wp_send_json_error( array( 'message' => __( 'Missing job ID or step.', 'ai-blog-posts' ) ) );
+		}
+
+		// Extend execution time for this request
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 120 ); // 2 minutes per step
+		}
+
+		$generator = new Ai_Blog_Posts_Generator();
+		$result = $generator->process_step( $job_id, $step );
+
+		if ( is_wp_error( $result ) ) {
+			// Update queue topic if failed
+			$job = $generator->get_job( $job_id );
+			if ( $job && ! empty( $job['options']['queue_topic_id'] ) ) {
+				global $wpdb;
+				$table = $wpdb->prefix . 'ai_blog_posts_topics';
+				$wpdb->update(
+					$table,
+					array(
+						'status'     => 'failed',
+						'last_error' => $result->get_error_message(),
+					),
+					array( 'id' => $job['options']['queue_topic_id'] ),
+					array( '%s', '%s' ),
+					array( '%d' )
+				);
+			}
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+
+		// If step is image and completed, call complete_with_image
+		if ( $step === 'image' && isset( $result['next_step'] ) && $result['next_step'] === 'complete' ) {
+			$result = $generator->complete_with_image( $job_id );
+			if ( is_wp_error( $result ) ) {
+				wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+			}
+		}
+
+		wp_send_json_success( $result );
+	}
+
+	/**
+	 * AJAX handler: Get job status.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_get_job_status() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$job_id = isset( $_POST['job_id'] ) ? sanitize_text_field( wp_unslash( $_POST['job_id'] ) ) : '';
+
+		if ( empty( $job_id ) ) {
+			wp_send_json_error( array( 'message' => __( 'Missing job ID.', 'ai-blog-posts' ) ) );
+		}
+
+		$generator = new Ai_Blog_Posts_Generator();
+		$job = $generator->get_job( $job_id );
+
+		if ( ! $job ) {
+			wp_send_json_error( array( 'message' => __( 'Job not found or expired.', 'ai-blog-posts' ) ) );
+		}
+
+		wp_send_json_success( array(
+			'status'          => $job['status'],
+			'current_step'    => $job['current_step'],
+			'steps_completed' => $job['steps_completed'],
+			'error'           => $job['error'],
+			'post_id'         => $job['post_id'],
+		) );
+	}
+
+	/**
+	 * AJAX handler: Generate post (legacy single-request mode, kept for backward compatibility).
 	 *
 	 * @since    1.0.0
 	 */
@@ -363,6 +512,11 @@ class Ai_Blog_Posts_Admin {
 
 		if ( empty( $topic ) ) {
 			wp_send_json_error( array( 'message' => __( 'Topic is required.', 'ai-blog-posts' ) ) );
+		}
+
+		// Extend execution time
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 300 ); // 5 minutes
 		}
 
 		// If generating from queue, update status to processing
@@ -547,6 +701,7 @@ class Ai_Blog_Posts_Admin {
 
 	/**
 	 * AJAX handler: Generate post from queue.
+	 * Supports both step-by-step mode (use_steps=true) and legacy single-request mode.
 	 *
 	 * @since    1.0.0
 	 */
@@ -558,6 +713,7 @@ class Ai_Blog_Posts_Admin {
 		}
 
 		$topic_id = isset( $_POST['topic_id'] ) ? absint( $_POST['topic_id'] ) : 0;
+		$use_steps = isset( $_POST['use_steps'] ) && filter_var( $_POST['use_steps'], FILTER_VALIDATE_BOOLEAN );
 
 		if ( ! $topic_id ) {
 			wp_send_json_error( array( 'message' => __( 'Invalid topic ID.', 'ai-blog-posts' ) ) );
@@ -584,8 +740,48 @@ class Ai_Blog_Posts_Admin {
 			array( '%d' )
 		);
 
-		// Generate the post
 		$generator = new Ai_Blog_Posts_Generator();
+
+		// Step-by-step mode: Create a job and return the job ID
+		if ( $use_steps ) {
+			$job_id = $generator->create_job( $topic->topic, array(
+				'keywords'       => $topic->keywords,
+				'category_id'    => $topic->category_id,
+				'publish'        => false,
+				'source'         => 'queue',
+				'generate_image' => Ai_Blog_Posts_Settings::get( 'image_enabled' ),
+				'queue_topic_id' => $topic_id,
+			) );
+
+			if ( is_wp_error( $job_id ) ) {
+				$wpdb->update(
+					$table,
+					array(
+						'status'     => 'failed',
+						'attempts'   => $topic->attempts + 1,
+						'last_error' => $job_id->get_error_message(),
+					),
+					array( 'id' => $topic_id ),
+					array( '%s', '%d', '%s' ),
+					array( '%d' )
+				);
+				wp_send_json_error( array( 'message' => $job_id->get_error_message() ) );
+			}
+
+			wp_send_json_success( array(
+				'job_id'    => $job_id,
+				'next_step' => 'outline',
+				'message'   => __( 'Generation started.', 'ai-blog-posts' ),
+			) );
+			return;
+		}
+
+		// Legacy single-request mode (for backward compatibility and scheduled tasks)
+		// Extend execution time
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 300 ); // 5 minutes
+		}
+
 		$result = $generator->generate_post( $topic->topic, array(
 			'keywords'    => $topic->keywords,
 			'category_id' => $topic->category_id,
@@ -628,6 +824,7 @@ class Ai_Blog_Posts_Admin {
 			'post_id'  => $result['post_id'],
 			'title'    => get_the_title( $result['post_id'] ),
 			'edit_url' => get_edit_post_link( $result['post_id'], 'raw' ),
+			'view_url' => get_permalink( $result['post_id'] ),
 			'post_url' => get_permalink( $result['post_id'] ),
 		) );
 	}
@@ -723,6 +920,217 @@ class Ai_Blog_Posts_Admin {
 			'message' => __( 'Trending topics fetched.', 'ai-blog-posts' ),
 			'topics'  => $result,
 		) );
+	}
+
+	/**
+	 * AJAX handler: Get server diagnostics.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_server_diagnostics() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$diagnostics = array();
+		$warnings = array();
+		$recommendations = array();
+
+		// PHP Version
+		$php_version = phpversion();
+		$diagnostics['php_version'] = $php_version;
+		if ( version_compare( $php_version, '7.4', '<' ) ) {
+			$warnings[] = __( 'PHP version is below 7.4. Consider upgrading for better performance.', 'ai-blog-posts' );
+		}
+
+		// PHP max_execution_time
+		$max_exec_time = ini_get( 'max_execution_time' );
+		$diagnostics['max_execution_time'] = $max_exec_time;
+		if ( $max_exec_time > 0 && $max_exec_time < 60 ) {
+			$warnings[] = sprintf(
+				/* translators: %d: seconds */
+				__( 'PHP max_execution_time is %d seconds. This may cause timeout issues with longer content generation.', 'ai-blog-posts' ),
+				$max_exec_time
+			);
+			$recommendations[] = __( 'The plugin uses step-by-step generation to work around this limit, but increasing it to 120+ seconds would improve reliability.', 'ai-blog-posts' );
+		}
+
+		// PHP memory_limit
+		$memory_limit = ini_get( 'memory_limit' );
+		$diagnostics['memory_limit'] = $memory_limit;
+		$memory_bytes = wp_convert_hr_to_bytes( $memory_limit );
+		if ( $memory_bytes < 128 * 1024 * 1024 ) {
+			$warnings[] = sprintf(
+				/* translators: %s: memory limit */
+				__( 'PHP memory_limit is %s. Consider increasing to at least 256M for optimal performance.', 'ai-blog-posts' ),
+				$memory_limit
+			);
+		}
+
+		// WordPress memory limit
+		$wp_memory_limit = WP_MEMORY_LIMIT;
+		$diagnostics['wp_memory_limit'] = $wp_memory_limit;
+
+		// cURL availability
+		$diagnostics['curl_enabled'] = function_exists( 'curl_version' );
+		if ( ! function_exists( 'curl_version' ) ) {
+			$warnings[] = __( 'cURL is not available. This may cause connection issues with the OpenAI API.', 'ai-blog-posts' );
+		}
+
+		// OpenSSL availability
+		$diagnostics['openssl_enabled'] = extension_loaded( 'openssl' );
+		if ( ! extension_loaded( 'openssl' ) ) {
+			$warnings[] = __( 'OpenSSL extension is not loaded. HTTPS connections may fail.', 'ai-blog-posts' );
+		}
+
+		// Test outbound connection to OpenAI
+		$diagnostics['openai_reachable'] = false;
+		$test_response = wp_remote_get( 'https://api.openai.com/v1/models', array(
+			'timeout' => 10,
+			'headers' => array( 'Authorization' => 'Bearer test' ),
+		) );
+		if ( ! is_wp_error( $test_response ) ) {
+			$diagnostics['openai_reachable'] = true;
+		} else {
+			$warnings[] = sprintf(
+				/* translators: %s: error message */
+				__( 'Cannot reach OpenAI API: %s', 'ai-blog-posts' ),
+				$test_response->get_error_message()
+			);
+		}
+
+		// WP Cron status
+		$diagnostics['wp_cron_disabled'] = defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON;
+		if ( $diagnostics['wp_cron_disabled'] ) {
+			$recommendations[] = __( 'WP-Cron is disabled. Scheduled post generation may not work unless you have a server cron configured.', 'ai-blog-posts' );
+		}
+
+		// Server software
+		$diagnostics['server_software'] = isset( $_SERVER['SERVER_SOFTWARE'] ) ? sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) : 'Unknown';
+
+		// Check if loopback connections work
+		// A successful loopback means the server can reach itself - any HTTP response (even 400) indicates connectivity
+		$diagnostics['loopback_working'] = false;
+		$loopback_test = wp_remote_get( admin_url( 'admin-ajax.php' ), array( 'timeout' => 10 ) );
+		if ( ! is_wp_error( $loopback_test ) ) {
+			$response_code = wp_remote_retrieve_response_code( $loopback_test );
+			// Any valid HTTP response code indicates the loopback connection works
+			// admin-ajax.php returns 400 when called without action param, which is expected
+			if ( $response_code >= 200 && $response_code < 500 ) {
+				$diagnostics['loopback_working'] = true;
+			}
+		}
+		if ( ! $diagnostics['loopback_working'] ) {
+			$recommendations[] = __( 'Loopback connections may not be working. This could affect some background processing features.', 'ai-blog-posts' );
+		}
+
+		// Overall status
+		$status = empty( $warnings ) ? 'good' : ( count( $warnings ) > 2 ? 'poor' : 'fair' );
+
+		wp_send_json_success( array(
+			'status'          => $status,
+			'diagnostics'     => $diagnostics,
+			'warnings'        => $warnings,
+			'recommendations' => $recommendations,
+		) );
+	}
+
+	/**
+	 * AJAX handler: Import topics from CSV.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_import_csv() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$topics_json = isset( $_POST['topics'] ) ? wp_unslash( $_POST['topics'] ) : '';
+		$topics = json_decode( $topics_json, true );
+
+		if ( empty( $topics ) || ! is_array( $topics ) ) {
+			wp_send_json_error( array( 'message' => __( 'No valid topics data received.', 'ai-blog-posts' ) ) );
+		}
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_topics';
+
+		$imported = 0;
+		$skipped = 0;
+
+		foreach ( $topics as $topic_data ) {
+			$topic = isset( $topic_data['topic'] ) ? sanitize_text_field( $topic_data['topic'] ) : '';
+			if ( empty( $topic ) ) {
+				$skipped++;
+				continue;
+			}
+
+			$keywords = isset( $topic_data['keywords'] ) ? sanitize_text_field( $topic_data['keywords'] ) : '';
+			$priority = isset( $topic_data['priority'] ) ? absint( $topic_data['priority'] ) : 0;
+			$category = isset( $topic_data['category'] ) ? sanitize_text_field( $topic_data['category'] ) : '';
+
+			// Resolve category by name or slug
+			$category_id = 0;
+			if ( ! empty( $category ) ) {
+				// First try to find by name (case-insensitive)
+				$cat = get_term_by( 'name', $category, 'category' );
+				
+				// If not found by name, try by slug
+				if ( ! $cat ) {
+					$cat = get_term_by( 'slug', sanitize_title( $category ), 'category' );
+				}
+
+				// If still not found, create the category
+				if ( ! $cat ) {
+					$new_cat = wp_insert_term( $category, 'category' );
+					if ( ! is_wp_error( $new_cat ) ) {
+						$category_id = $new_cat['term_id'];
+					}
+				} else {
+					$category_id = $cat->term_id;
+				}
+			}
+
+			$inserted = $wpdb->insert(
+				$table,
+				array(
+					'topic'       => $topic,
+					'keywords'    => $keywords,
+					'category_id' => $category_id,
+					'source'      => 'csv',
+					'status'      => 'pending',
+					'priority'    => $priority,
+					'created_at'  => current_time( 'mysql' ),
+				),
+				array( '%s', '%s', '%d', '%s', '%s', '%d', '%s' )
+			);
+
+			if ( $inserted ) {
+				$imported++;
+			} else {
+				$skipped++;
+			}
+		}
+
+		$message = sprintf(
+			/* translators: 1: number of imported topics, 2: number of skipped topics */
+			__( '%1$d topic(s) imported successfully.', 'ai-blog-posts' ),
+			$imported
+		);
+
+		if ( $skipped > 0 ) {
+			$message .= ' ' . sprintf(
+				/* translators: %d: number of skipped topics */
+				__( '%d skipped.', 'ai-blog-posts' ),
+				$skipped
+			);
+		}
+
+		wp_send_json_success( array( 'message' => $message, 'imported' => $imported, 'skipped' => $skipped ) );
 	}
 
 	/**
