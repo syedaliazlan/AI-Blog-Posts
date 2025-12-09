@@ -399,7 +399,6 @@
 					} else {
 						// Retry on certain errors
 						if (retryCount < maxRetries && self.isRetryableError(response.data.message)) {
-							console.log('Retrying step ' + step + ' (attempt ' + (retryCount + 2) + ')');
 							setTimeout(function() {
 								self.processNextStep(jobId, step, formData, retryCount + 1);
 							}, 2000);
@@ -411,7 +410,6 @@
 				error: function(xhr, status, error) {
 					// Retry on timeout or connection errors
 					if (retryCount < maxRetries && (status === 'timeout' || status === 'error')) {
-						console.log('Retrying step ' + step + ' after error (attempt ' + (retryCount + 2) + ')');
 						setTimeout(function() {
 							self.processNextStep(jobId, step, formData, retryCount + 1);
 						}, 3000);

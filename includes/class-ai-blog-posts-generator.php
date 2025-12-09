@@ -277,6 +277,20 @@ class Ai_Blog_Posts_Generator {
 			return $result;
 		}
 
+		// Validate that critical steps didn't return empty content
+		if ( in_array( $step, array( 'outline', 'content' ), true ) && empty( $result ) ) {
+			$error_msg = sprintf(
+				/* translators: %s: step name */
+				__( 'The %s step returned empty content. This usually indicates an API issue. Please check your API key and try again.', 'ai-blog-posts' ),
+				$step
+			);
+			$this->update_job( $job_id, array( 
+				'status' => 'error',
+				'error'  => $error_msg,
+			) );
+			return new WP_Error( 'empty_result', $error_msg );
+		}
+
 		// Update job with results
 		$job = $this->get_job( $job_id );
 		if ( ! $job ) {
@@ -715,6 +729,11 @@ class Ai_Blog_Posts_Generator {
 			$prompt .= sprintf( "\n\nAdditional instructions: %s", $options['instructions'] );
 		}
 
+		// Log model being used for debugging
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( sprintf( 'AI Blog Posts: Generating outline using model: %s', $options['model'] ) );
+		}
+
 		$result = $this->openai->generate_text( $prompt, $system_prompt, array(
 			'model'       => $options['model'],
 			'max_tokens'  => 1000,
@@ -722,12 +741,38 @@ class Ai_Blog_Posts_Generator {
 		) );
 
 		if ( is_wp_error( $result ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'AI Blog Posts: Outline generation error: %s', $result->get_error_message() ) );
+			}
 			return $result;
 		}
 
 		$this->track_tokens( $result );
 
-		return $result['content'];
+		// Validate we got actual content
+		$content = $result['content'] ?? '';
+		if ( empty( trim( $content ) ) ) {
+			// Log debug info for empty response
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 
+					'AI Blog Posts: Empty outline response. Model: %s, Tokens: %d/%d, Finish reason: %s', 
+					$result['model'] ?? 'unknown',
+					$result['prompt_tokens'] ?? 0,
+					$result['completion_tokens'] ?? 0,
+					$result['finish_reason'] ?? 'unknown'
+				) );
+			}
+			return new WP_Error( 
+				'empty_outline', 
+				sprintf(
+					/* translators: %s: model name */
+					__( 'The AI returned an empty outline using model "%s". This can happen if: 1) The model does not exist, 2) Your API key lacks permissions, or 3) You have no API credits. Please check your Settings page.', 'ai-blog-posts' ),
+					$options['model']
+				)
+			);
+		}
+
+		return $content;
 	}
 
 	/**
@@ -785,7 +830,16 @@ class Ai_Blog_Posts_Generator {
 
 		$this->track_tokens( $result );
 
-		return $result['content'];
+		// Validate we got actual content
+		$content = $result['content'] ?? '';
+		if ( empty( trim( $content ) ) ) {
+			return new WP_Error( 
+				'empty_content', 
+				__( 'The AI returned empty content. Please check your API key has sufficient credits and try again.', 'ai-blog-posts' ) 
+			);
+		}
+
+		return $content;
 	}
 
 	/**

@@ -3,7 +3,7 @@ Contributors: aliazlan
 Donate link: https://devonicweb.co.uk/
 Tags: ai, blog, content, openai, gpt, automation, seo
 Requires at least: 5.8
-Tested up to: 6.4
+Tested up to: 6.7
 Requires PHP: 7.4
 Stable tag: 1.0.0
 License: GPLv2 or later
@@ -27,8 +27,9 @@ AI Blog Posts is a powerful WordPress plugin that leverages OpenAI's advanced la
 
 **AI Models**
 
-* Support for GPT-4o, GPT-4o-mini, GPT-4-turbo, and GPT-3.5-turbo
-* DALL-E 3 integration for featured image generation
+* Support for latest GPT-5.1, GPT-5 Mini, GPT-5 Nano, GPT-5 Pro, GPT-4.1, GPT-4o models
+* GPT Image 1 and GPT Image 1 Mini for state-of-the-art image generation
+* Legacy DALL-E 3 support
 * Automatic model pricing calculation and cost tracking
 
 **Scheduling & Automation**
@@ -40,8 +41,8 @@ AI Blog Posts is a powerful WordPress plugin that leverages OpenAI's advanced la
 
 **SEO Integration**
 
-* Auto-generate meta descriptions and focus keywords
-* Seamless integration with Yoast SEO and RankMath
+* Auto-generate meta descriptions, focus keywords, and SEO titles
+* Seamless integration with Yoast SEO, RankMath, and All In One SEO Pack
 * SEO-optimized content structure and heading hierarchy
 
 **Website Analysis**
@@ -87,7 +88,7 @@ Yes, you need an OpenAI API key to use this plugin. Sign up at platform.openai.c
 
 = How much does it cost to generate a post? =
 
-Costs vary based on the model you choose and post length. Using GPT-4o-mini, a typical 1000-word post costs approximately $0.01-0.03. DALL-E images add $0.04-0.08 per image.
+Costs vary based on the model you choose and post length. Using GPT-5 Mini (recommended), a typical 1000-word post costs approximately $0.01-0.03. GPT Image 1 images add $0.04-0.08 per image.
 
 = Can I schedule automatic posting? =
 
@@ -97,9 +98,9 @@ Yes! Configure the scheduling options in Settings → Scheduling. You can set fr
 
 The plugin includes a multi-level "humanization" feature that rewrites content to sound more natural. Higher levels significantly reduce AI-detectable patterns.
 
-= Does it work with Yoast SEO or RankMath? =
+= Does it work with popular SEO plugins? =
 
-Yes! The plugin automatically detects your SEO plugin and populates meta descriptions, focus keywords, and SEO titles.
+Yes! The plugin automatically detects and integrates with Yoast SEO, RankMath, and All In One SEO Pack. It populates meta descriptions, focus keywords, and SEO titles automatically.
 
 = What happens if I hit my budget limit? =
 
@@ -117,12 +118,14 @@ Auto-posting will automatically pause, and you'll receive an email notification.
 
 = 1.0.0 =
 * Initial release
-* GPT-4o, GPT-4o-mini, GPT-4-turbo, GPT-3.5-turbo support
-* DALL-E 3 featured image generation
-* Yoast SEO and RankMath integration
+* GPT-5.1, GPT-5 Mini, GPT-5 Nano, GPT-5 Pro, GPT-4.1, GPT-4o support
+* GPT Image 1 and DALL-E 3 featured image generation
+* Yoast SEO, RankMath, and All In One SEO Pack integration
 * Scheduled posting with topic queue
+* CSV import for bulk topic upload
 * Google Trends integration
 * Website style analysis
+* Step-by-step generation with retry logic
 * Comprehensive cost tracking
 * Budget limits and alerts
 

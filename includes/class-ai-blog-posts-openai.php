@@ -238,13 +238,13 @@ class Ai_Blog_Posts_OpenAI {
 	 * @return   bool             True if uses max_completion_tokens.
 	 */
 	private function uses_max_completion_tokens( $model ) {
-		// All GPT-5.x, GPT-4.1.x, GPT-4o, o1, o3, o4 models use max_completion_tokens
+		// GPT-5.x, GPT-4.1.x, GPT-4o, and reasoning models use max_completion_tokens parameter
 		$new_model_prefixes = array(
 			'gpt-5',    // GPT-5, GPT-5.1, GPT-5-mini, GPT-5-nano, GPT-5-pro
 			'gpt-4.1',  // GPT-4.1, GPT-4.1-mini
 			'gpt-4o',   // GPT-4o, GPT-4o-mini
 			'o1',       // o1, o1-mini, o1-pro
-			'o3',       // o3, o3-mini, o3-pro
+			'o3',       // o3, o3-mini
 			'o4',       // o4-mini
 		);
 
@@ -308,7 +308,7 @@ class Ai_Blog_Posts_OpenAI {
 	public function generate_image( $prompt, $options = array() ) {
 		$model = $options['model'] ?? Ai_Blog_Posts_Settings::get( 'image_model' );
 		$size = $options['size'] ?? Ai_Blog_Posts_Settings::get( 'image_size' );
-		$quality = $options['quality'] ?? 'standard';
+		$quality = $options['quality'] ?? 'hd';
 		$style = $options['style'] ?? 'natural';
 
 		$body = array(
@@ -319,8 +319,8 @@ class Ai_Blog_Posts_OpenAI {
 			'response_format' => 'url',
 		);
 
-		// DALL-E 3 specific options
-		if ( 'dall-e-3' === $model ) {
+		// GPT Image 1 and DALL-E 3 support quality and style options
+		if ( in_array( $model, array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3' ), true ) ) {
 			$body['quality'] = $quality;
 			$body['style'] = $style;
 		}
@@ -656,8 +656,9 @@ class Ai_Blog_Posts_OpenAI {
 
 		$pricing = $models[ $model ]['pricing'];
 
-		// DALL-E 3 HD quality doubles the price
-		$multiplier = ( 'dall-e-3' === $model && 'hd' === $quality ) ? 2 : 1;
+		// HD quality doubles the price for GPT Image 1 and DALL-E 3
+		$hd_models = array( 'gpt-image-1', 'gpt-image-1-mini', 'dall-e-3' );
+		$multiplier = ( in_array( $model, $hd_models, true ) && 'hd' === $quality ) ? 2 : 1;
 
 		return isset( $pricing[ $size ] ) ? $pricing[ $size ] * $multiplier : 0.0;
 	}
@@ -670,15 +671,12 @@ class Ai_Blog_Posts_OpenAI {
 	 * @return   array            Filtered models.
 	 */
 	private function filter_relevant_models( $models ) {
-		// Include all GPT-5, GPT-4, o-series and image models
+		// Include GPT-5, GPT-4, and image models
 		$relevant_prefixes = array(
 			'gpt-5',      // GPT-5.x series
 			'gpt-4',      // GPT-4.x series (including 4o, 4.1, 4-turbo)
-			'gpt-3.5',    // Legacy
-			'o1',         // o1 reasoning models
-			'o3',         // o3 reasoning models
-			'o4',         // o4 reasoning models
-			'dall-e',     // Image models
+			'gpt-image',  // GPT Image 1, GPT Image 1 mini
+			'dall-e',     // Legacy image models
 		);
 		$filtered = array();
 

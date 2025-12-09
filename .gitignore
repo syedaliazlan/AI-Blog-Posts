@@ -1,0 +1,42 @@
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build files
+*.zip
+*.tar.gz
+
+# Logs
+*.log
+debug.log
+error.log
+
+# Local config
+.env
+.env.local
+wp-config.php
+
+# Compiled assets
+*.min.css.map
+*.min.js.map
+
+# Test files
+tests/
+phpunit.xml
+.phpunit.result.cache
+
+# Documentation build
+docs/_build/
+

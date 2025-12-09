@@ -15,7 +15,7 @@
  * @wordpress-plugin
  * Plugin Name:       AI Blog Posts
  * Plugin URI:        https://github.com/syedaliazlan/AI-Blog-Posts
- * Description:       Automatically generate and publish high-quality, SEO-optimized blog posts using OpenAI's GPT models. Features include DALL-E image generation, Yoast/RankMath integration, scheduled posting, trending topics, and comprehensive cost tracking.
+ * Description:       Automatically generate and publish high-quality, SEO-optimized blog posts using OpenAI's latest GPT-5 models. Features include GPT Image 1 generation, Yoast/RankMath/AIOSEO integration, scheduled posting, trending topics, CSV import, and comprehensive cost tracking.
  * Version:           1.0.0
  * Author:            Ali Azlan
  * Author URI:        https://devonicweb.co.uk/
