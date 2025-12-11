@@ -113,6 +113,11 @@ class Ai_Blog_Posts {
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-ai-blog-posts-i18n.php';
 
 		/**
+		 * Activator class for database upgrades and activation tasks.
+		 */
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-ai-blog-posts-activator.php';
+
+		/**
 		 * Encryption helper for secure API key storage.
 		 */
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-ai-blog-posts-encryption.php';
@@ -199,6 +204,9 @@ class Ai_Blog_Posts {
 	private function define_admin_hooks() {
 
 		$plugin_admin = new Ai_Blog_Posts_Admin( $this->get_plugin_name(), $this->get_version() );
+
+		// Database upgrade check on admin_init
+		$this->loader->add_action( 'admin_init', 'Ai_Blog_Posts_Activator', 'maybe_upgrade' );
 
 		// Styles and scripts
 		$this->loader->add_action( 'admin_enqueue_scripts', $plugin_admin, 'enqueue_styles' );

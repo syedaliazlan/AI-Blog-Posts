@@ -157,7 +157,7 @@ class Ai_Blog_Posts_OpenAI {
 
 		// Check if model supports system messages (o1/reasoning models don't)
 		$is_reasoning_model = $this->is_reasoning_model( $model );
-		// GPT-5 models use "developer" role instead of "system" role
+		// GPT-5 models (all variants) use "developer" role instead of "system" role
 		$is_gpt5_model = strpos( $model, 'gpt-5' ) === 0;
 		
 		if ( ! empty( $system_prompt ) ) {
@@ -189,8 +189,7 @@ class Ai_Blog_Posts_OpenAI {
 			'messages' => $messages,
 		);
 
-		// GPT-5 models use reasoning tokens internally - we need much higher token limits
-		// The model uses tokens for internal chain-of-thought before generating output
+		// GPT-5 models (all variants) use reasoning tokens internally - need higher limits
 		if ( $is_gpt5_model ) {
 			// Triple the requested tokens to ensure enough for reasoning + output
 			$body['max_completion_tokens'] = $max_tokens * 3;
@@ -316,7 +315,7 @@ class Ai_Blog_Posts_OpenAI {
 	 * @return   bool             True if supports custom temperature.
 	 */
 	private function supports_temperature( $model ) {
-		// GPT-5 series and reasoning models only support default temperature (1)
+		// GPT-5 series (all variants) and reasoning models don't support custom temperature
 		$no_temp_prefixes = array( 'gpt-5', 'o1', 'o3' );
 
 		foreach ( $no_temp_prefixes as $prefix ) {
@@ -405,10 +404,13 @@ class Ai_Blog_Posts_OpenAI {
 			require_once ABSPATH . 'wp-admin/includes/image.php';
 		}
 
-		// Download file to temp location
-		$temp_file = download_url( $url );
+		// Download file to temp location with extended timeout for large images
+		$temp_file = download_url( $url, 120 ); // 120 second timeout
 
 		if ( is_wp_error( $temp_file ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'AI Blog Posts: Image download failed: %s', $temp_file->get_error_message() ) );
+			}
 			return $temp_file;
 		}
 

@@ -357,11 +357,12 @@
 			const stepInfo = this.generationSteps[step];
 			if (stepInfo) {
 				$('#progress-status').text(stepInfo.label);
-				const progress = ((stepInfo.index + 1) / 6) * 100;
-				$('#progress-fill').css('width', progress + '%');
+				// 7 total steps (indices 0-6): outline, content, humanize, seo, finalize, image, complete
+				const progress = ((stepInfo.index + 1) / 7) * 100;
+				$('#progress-fill').css('width', Math.min(progress, 100) + '%');
 
-				// Mark previous steps as complete
-				const allSteps = ['outline', 'content', 'humanize', 'seo', 'image', 'complete'];
+				// Mark previous steps as complete - must include all steps from generationSteps
+				const allSteps = ['outline', 'content', 'humanize', 'seo', 'finalize', 'image', 'complete'];
 				allSteps.forEach(function(s, idx) {
 					const $step = $('.progress-step[data-step="' + s + '"]');
 					if (idx < stepInfo.index) {

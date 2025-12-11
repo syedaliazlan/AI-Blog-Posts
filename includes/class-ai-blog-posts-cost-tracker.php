@@ -188,8 +188,8 @@ class Ai_Blog_Posts_Cost_Tracker {
 		$stats['total_cost'] = (float) ( $all_time->total_cost ?? 0 );
 		$stats['avg_cost'] = (float) ( $all_time->avg_cost ?? 0 );
 
-		// This month
-		$month_start = date( 'Y-m-01 00:00:00' );
+		// This month (use WordPress timezone)
+		$month_start = current_time( 'Y-m-01' ) . ' 00:00:00';
 		$this_month = $wpdb->get_row(
 			$wpdb->prepare(
 				"SELECT 
@@ -204,8 +204,8 @@ class Ai_Blog_Posts_Cost_Tracker {
 		$stats['posts_this_month'] = (int) ( $this_month->posts ?? 0 );
 		$stats['cost_this_month'] = (float) ( $this_month->cost ?? 0 );
 
-		// This week
-		$week_start = date( 'Y-m-d 00:00:00', strtotime( 'monday this week' ) );
+		// This week (use WordPress timezone)
+		$week_start = date( 'Y-m-d 00:00:00', strtotime( 'monday this week', current_time( 'timestamp' ) ) );
 		$this_week = $wpdb->get_row(
 			$wpdb->prepare(
 				"SELECT 
@@ -220,8 +220,8 @@ class Ai_Blog_Posts_Cost_Tracker {
 		$stats['posts_this_week'] = (int) ( $this_week->posts ?? 0 );
 		$stats['cost_this_week'] = (float) ( $this_week->cost ?? 0 );
 
-		// Today
-		$today = date( 'Y-m-d 00:00:00' );
+		// Today (use WordPress timezone)
+		$today = current_time( 'Y-m-d' ) . ' 00:00:00';
 		$today_stats = $wpdb->get_row(
 			$wpdb->prepare(
 				"SELECT 
@@ -263,7 +263,8 @@ class Ai_Blog_Posts_Cost_Tracker {
 	public function get_monthly_cost() {
 		global $wpdb;
 
-		$month_start = date( 'Y-m-01 00:00:00' );
+		// Use WordPress timezone for consistent date calculations
+		$month_start = current_time( 'Y-m-01' ) . ' 00:00:00';
 
 		return (float) $wpdb->get_var(
 			$wpdb->prepare(
@@ -458,7 +459,8 @@ Auto-posting has been automatically paused. You can resume it by increasing your
 	public function get_posts_generated_today() {
 		global $wpdb;
 
-		$today = date( 'Y-m-d 00:00:00' );
+		// Use WordPress timezone for consistent date calculations
+		$today = current_time( 'Y-m-d' ) . ' 00:00:00';
 
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(

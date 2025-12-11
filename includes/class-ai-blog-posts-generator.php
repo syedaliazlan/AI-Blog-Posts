@@ -631,12 +631,32 @@ class Ai_Blog_Posts_Generator {
 			$this->seo->set_post_meta( $post_id, $seo_data );
 		}
 
-		// Step 8: Generate featured image
+		// Step 8: Generate featured image (with error isolation)
 		$image_cost = 0;
 		if ( $options['generate_image'] ) {
-			$image_result = $this->generate_featured_image( $post_id, $topic, $post_data['post_title'] );
-			if ( ! is_wp_error( $image_result ) ) {
-				$image_cost = $image_result['cost_usd'] ?? 0;
+			try {
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+					error_log( sprintf( 'AI Blog Posts: Starting image generation for post %d', $post_id ) );
+				}
+				
+				$image_result = $this->generate_featured_image( $post_id, $topic, $post_data['post_title'] );
+				
+				if ( is_wp_error( $image_result ) ) {
+					// Log error but don't fail the whole generation
+					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+						error_log( sprintf( 'AI Blog Posts: Image generation failed: %s', $image_result->get_error_message() ) );
+					}
+				} else {
+					$image_cost = $image_result['cost_usd'] ?? 0;
+					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+						error_log( sprintf( 'AI Blog Posts: Image generation completed for post %d', $post_id ) );
+					}
+				}
+			} catch ( Exception $e ) {
+				// Catch any unexpected errors - don't let image failure stop post creation
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+					error_log( sprintf( 'AI Blog Posts: Image generation exception: %s', $e->getMessage() ) );
+				}
 			}
 		}
 

@@ -56,6 +56,32 @@ class Ai_Blog_Posts_Scheduler {
 	 * @since    1.0.0
 	 */
 	public function run_scheduled_generation() {
+		// Prevent concurrent executions using a lock
+		$lock_key = 'ai_blog_posts_generation_lock';
+		$lock = get_transient( $lock_key );
+		
+		if ( $lock ) {
+			$this->log_event( 'Scheduled generation skipped: Another generation is in progress.' );
+			return;
+		}
+
+		// Set lock for 10 minutes max (in case of crash)
+		set_transient( $lock_key, time(), 10 * MINUTE_IN_SECONDS );
+
+		try {
+			$this->do_scheduled_generation();
+		} finally {
+			// Always release lock when done
+			delete_transient( $lock_key );
+		}
+	}
+
+	/**
+	 * Perform the actual scheduled generation.
+	 *
+	 * @since    1.0.0
+	 */
+	private function do_scheduled_generation() {
 		// Check if scheduling is enabled
 		if ( ! Ai_Blog_Posts_Settings::get( 'schedule_enabled' ) ) {
 			return;
@@ -84,13 +110,15 @@ class Ai_Blog_Posts_Scheduler {
 			return;
 		}
 
-		// Get next topic from queue
-		$topic = $this->get_next_topic();
+		// Get and lock next topic from queue
+		$topic = $this->get_and_lock_next_topic();
 
 		if ( ! $topic ) {
 			$this->log_event( 'Scheduled generation skipped: No topics in queue.' );
 			return;
 		}
+
+		$this->log_event( sprintf( 'Starting scheduled generation for topic: "%s"', $topic->topic ) );
 
 		// Generate the post
 		$result = $this->generator->generate_post( $topic->topic, array(
@@ -148,14 +176,29 @@ class Ai_Blog_Posts_Scheduler {
 	}
 
 	/**
-	 * Get the next topic from the queue.
+	 * Get and lock the next topic from the queue.
+	 *
+	 * Atomically selects and marks a topic as 'processing' to prevent
+	 * duplicate processing by concurrent cron jobs.
 	 *
 	 * @since    1.0.0
 	 * @return   object|null    Topic object or null.
 	 */
-	private function get_next_topic() {
+	private function get_and_lock_next_topic() {
 		global $wpdb;
 		$table = $wpdb->prefix . 'ai_blog_posts_topics';
+
+		// First, reset any stale 'processing' topics (older than 15 minutes)
+		// This handles cases where a previous run crashed
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE $table 
+				SET status = 'pending' 
+				WHERE status = 'processing' 
+				AND locked_at < %s",
+				gmdate( 'Y-m-d H:i:s', time() - 15 * MINUTE_IN_SECONDS )
+			)
+		);
 
 		// Get highest priority pending topic
 		$topic = $wpdb->get_row(
@@ -165,6 +208,30 @@ class Ai_Blog_Posts_Scheduler {
 			ORDER BY priority DESC, created_at ASC 
 			LIMIT 1"
 		);
+
+		if ( ! $topic ) {
+			return null;
+		}
+
+		// Immediately lock this topic by setting status to 'processing'
+		$locked = $wpdb->update(
+			$table,
+			array(
+				'status'    => 'processing',
+				'locked_at' => current_time( 'mysql' ),
+			),
+			array(
+				'id'     => $topic->id,
+				'status' => 'pending', // Only update if still pending (race condition protection)
+			),
+			array( '%s', '%s' ),
+			array( '%d', '%s' )
+		);
+
+		// If we couldn't lock it (another process got it), return null
+		if ( ! $locked ) {
+			return null;
+		}
 
 		return $topic;
 	}
