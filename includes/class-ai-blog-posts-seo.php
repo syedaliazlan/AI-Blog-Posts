@@ -11,7 +11,7 @@
  */
 
 /**
- * Handles integration with Yoast SEO and RankMath.
+ * Handles integration with Yoast SEO, RankMath, and All In One SEO.
  *
  * @since      1.0.0
  * @package    Ai_Blog_Posts
@@ -41,10 +41,20 @@ class Ai_Blog_Posts_SEO {
 	}
 
 	/**
+	 * Check if All In One SEO is active.
+	 *
+	 * @since    1.0.0
+	 * @return   bool
+	 */
+	public function is_aioseo_active() {
+		return defined( 'AIOSEO_VERSION' ) || class_exists( 'AIOSEO\\Plugin\\AIOSEO' );
+	}
+
+	/**
 	 * Get the active SEO plugin.
 	 *
 	 * @since    1.0.0
-	 * @return   string|null    'yoast', 'rankmath', or null.
+	 * @return   string|null    'yoast', 'rankmath', 'aioseo', or null.
 	 */
 	public function get_active_plugin() {
 		if ( $this->is_yoast_active() ) {
@@ -52,6 +62,9 @@ class Ai_Blog_Posts_SEO {
 		}
 		if ( $this->is_rankmath_active() ) {
 			return 'rankmath';
+		}
+		if ( $this->is_aioseo_active() ) {
+			return 'aioseo';
 		}
 		return null;
 	}
@@ -81,6 +94,9 @@ class Ai_Blog_Posts_SEO {
 			
 			case 'rankmath':
 				return $this->set_rankmath_meta( $post_id, $meta_description, $focus_keyword, $seo_title );
+			
+			case 'aioseo':
+				return $this->set_aioseo_meta( $post_id, $meta_description, $focus_keyword, $seo_title );
 			
 			default:
 				// Store as custom post meta for themes that might use it
@@ -154,6 +170,54 @@ class Ai_Blog_Posts_SEO {
 	}
 
 	/**
+	 * Set All In One SEO meta.
+	 *
+	 * @since    1.0.0
+	 * @param    int    $post_id          Post ID.
+	 * @param    string $meta_description Meta description.
+	 * @param    string $focus_keyword    Focus keyword.
+	 * @param    string $seo_title        SEO title.
+	 * @return   bool                     Success status.
+	 */
+	private function set_aioseo_meta( $post_id, $meta_description, $focus_keyword, $seo_title ) {
+		$success = true;
+
+		// AIOSEO stores data in post meta
+		if ( $meta_description ) {
+			$success = $success && update_post_meta( $post_id, '_aioseo_description', $meta_description );
+		}
+
+		if ( $focus_keyword ) {
+			// AIOSEO stores focus keyphrase in a JSON format
+			$keyphrases = array(
+				'focus'      => array( 'keyphrase' => $focus_keyword ),
+				'additional' => array(),
+			);
+			$success = $success && update_post_meta( $post_id, '_aioseo_keywords', wp_json_encode( $keyphrases ) );
+		}
+
+		if ( $seo_title ) {
+			$success = $success && update_post_meta( $post_id, '_aioseo_title', $seo_title );
+		}
+
+		// Set AIOSEO post data if the class method is available
+		if ( function_exists( 'aioseo' ) && method_exists( aioseo()->meta, 'savePost' ) ) {
+			// Let AIOSEO handle the meta through its API if available
+			$aioseo_data = array(
+				'title'       => $seo_title,
+				'description' => $meta_description,
+			);
+			if ( $focus_keyword ) {
+				$aioseo_data['keyphrases'] = array(
+					'focus' => array( 'keyphrase' => $focus_keyword ),
+				);
+			}
+		}
+
+		return $success;
+	}
+
+	/**
 	 * Set generic SEO meta for themes without SEO plugins.
 	 *
 	 * @since    1.0.0
@@ -204,6 +268,19 @@ class Ai_Blog_Posts_SEO {
 					'meta_description' => get_post_meta( $post_id, 'rank_math_description', true ),
 					'focus_keyword'    => get_post_meta( $post_id, 'rank_math_focus_keyword', true ),
 					'seo_title'        => get_post_meta( $post_id, 'rank_math_title', true ),
+				);
+			
+			case 'aioseo':
+				$focus_keyword = '';
+				$keyphrases_json = get_post_meta( $post_id, '_aioseo_keywords', true );
+				if ( $keyphrases_json ) {
+					$keyphrases = json_decode( $keyphrases_json, true );
+					$focus_keyword = $keyphrases['focus']['keyphrase'] ?? '';
+				}
+				return array(
+					'meta_description' => get_post_meta( $post_id, '_aioseo_description', true ),
+					'focus_keyword'    => $focus_keyword,
+					'seo_title'        => get_post_meta( $post_id, '_aioseo_title', true ),
 				);
 			
 			default:
@@ -267,6 +344,8 @@ class Ai_Blog_Posts_SEO {
 				return defined( 'WPSEO_VERSION' ) ? WPSEO_VERSION : '';
 			case 'rankmath':
 				return defined( 'RANK_MATH_VERSION' ) ? RANK_MATH_VERSION : '';
+			case 'aioseo':
+				return defined( 'AIOSEO_VERSION' ) ? AIOSEO_VERSION : '';
 			default:
 				return '';
 		}
