@@ -947,25 +947,42 @@ class Ai_Blog_Posts_Generator {
 
 		$result = $this->openai->generate_text( $prompt, $system_prompt, array(
 			'model'       => $options['model'],
-			'max_tokens'  => 300,
+			'max_tokens'  => 1500, // Increased for GPT-5 reasoning overhead
 			'temperature' => 0.5,
 		) );
 
 		if ( is_wp_error( $result ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( sprintf( 'AI Blog Posts: SEO generation failed: %s', $result->get_error_message() ) );
+			}
 			return array();
 		}
 
 		$this->track_tokens( $result );
 
 		// Parse JSON response
-		$json_content = $result['content'];
+		$json_content = $result['content'] ?? '';
 		
-		// Extract JSON from response (in case there's extra text)
-		if ( preg_match( '/\{[^}]+\}/', $json_content, $matches ) ) {
-			$json_content = $matches[0];
+		if ( empty( $json_content ) ) {
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( 'AI Blog Posts: SEO generation returned empty content' );
+			}
+			return array();
+		}
+
+		// Extract JSON from response - handle nested structures properly
+		$start = strpos( $json_content, '{' );
+		$end = strrpos( $json_content, '}' );
+		
+		if ( $start !== false && $end !== false && $end > $start ) {
+			$json_content = substr( $json_content, $start, $end - $start + 1 );
 		}
 
 		$seo_data = json_decode( $json_content, true );
+
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( sprintf( 'AI Blog Posts: SEO data generated: %s', wp_json_encode( $seo_data ) ) );
+		}
 
 		return is_array( $seo_data ) ? $seo_data : array();
 	}

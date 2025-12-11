@@ -78,6 +78,15 @@ class Ai_Blog_Posts_SEO {
 	 * @return   bool              Success status.
 	 */
 	public function set_post_meta( $post_id, $seo_data ) {
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( sprintf( 
+				'AI Blog Posts: set_post_meta called for post %d, seo_enabled=%s, data=%s',
+				$post_id,
+				Ai_Blog_Posts_Settings::get( 'seo_enabled' ) ? 'yes' : 'no',
+				wp_json_encode( $seo_data )
+			) );
+		}
+
 		if ( empty( $seo_data ) || ! Ai_Blog_Posts_Settings::get( 'seo_enabled' ) ) {
 			return false;
 		}
@@ -117,16 +126,33 @@ class Ai_Blog_Posts_SEO {
 	private function set_yoast_meta( $post_id, $meta_description, $focus_keyword, $seo_title ) {
 		$success = true;
 
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log( sprintf( 
+				'AI Blog Posts: Setting Yoast SEO for post %d - Title: %s, Desc: %s, Keyword: %s',
+				$post_id,
+				$seo_title ? 'yes' : 'no',
+				$meta_description ? 'yes' : 'no',
+				$focus_keyword ? 'yes' : 'no'
+			) );
+		}
+
 		if ( $meta_description ) {
-			$success = $success && update_post_meta( $post_id, '_yoast_wpseo_metadesc', $meta_description );
+			// Delete first to ensure clean update
+			delete_post_meta( $post_id, '_yoast_wpseo_metadesc' );
+			$result = update_post_meta( $post_id, '_yoast_wpseo_metadesc', sanitize_text_field( $meta_description ) );
+			$success = $success && ( $result !== false );
 		}
 
 		if ( $focus_keyword ) {
-			$success = $success && update_post_meta( $post_id, '_yoast_wpseo_focuskw', $focus_keyword );
+			delete_post_meta( $post_id, '_yoast_wpseo_focuskw' );
+			$result = update_post_meta( $post_id, '_yoast_wpseo_focuskw', sanitize_text_field( $focus_keyword ) );
+			$success = $success && ( $result !== false );
 		}
 
 		if ( $seo_title ) {
-			$success = $success && update_post_meta( $post_id, '_yoast_wpseo_title', $seo_title );
+			delete_post_meta( $post_id, '_yoast_wpseo_title' );
+			$result = update_post_meta( $post_id, '_yoast_wpseo_title', sanitize_text_field( $seo_title ) );
+			$success = $success && ( $result !== false );
 		}
 
 		// Set additional Yoast meta for better integration
