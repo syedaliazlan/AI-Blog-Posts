@@ -510,14 +510,21 @@ $rankmath_active = class_exists( 'RankMath' );
 								</select>
 							</td>
 						</tr>
-						<tr class="schedule-settings" style="<?php echo $settings['schedule_enabled'] ? '' : 'display:none;'; ?>">
+						<tr class="schedule-settings schedule-time-row" style="<?php 
+							echo ( $settings['schedule_enabled'] && $settings['schedule_frequency'] !== 'hourly' ) ? '' : 'display:none;'; 
+						?>">
 							<th scope="row">
 								<label for="schedule_time"><?php esc_html_e( 'Preferred Time', 'ai-blog-posts' ); ?></label>
 							</th>
 							<td>
 								<input type="time" id="schedule_time" name="schedule_time" 
 									   value="<?php echo esc_attr( $settings['schedule_time'] ); ?>">
-								<p class="description"><?php esc_html_e( 'The time to run scheduled posts (server timezone).', 'ai-blog-posts' ); ?></p>
+								<p class="description">
+									<?php 
+									/* translators: %s: WordPress timezone string */
+									printf( esc_html__( 'The time to run scheduled posts (WordPress timezone: %s). Not applicable for hourly frequency.', 'ai-blog-posts' ), esc_html( wp_timezone_string() ) ); 
+									?>
+								</p>
 							</td>
 						</tr>
 						<tr class="schedule-settings" style="<?php echo $settings['schedule_enabled'] ? '' : 'display:none;'; ?>">

@@ -226,6 +226,7 @@ class Ai_Blog_Posts {
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_save_settings', $plugin_admin, 'ajax_save_settings' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_generate_post', $plugin_admin, 'ajax_generate_post' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_add_topic', $plugin_admin, 'ajax_add_topic' );
+		$this->loader->add_action( 'wp_ajax_ai_blog_posts_update_topic', $plugin_admin, 'ajax_update_topic' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_delete_topic', $plugin_admin, 'ajax_delete_topic' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_bulk_delete_topics', $plugin_admin, 'ajax_bulk_delete_topics' );
 		$this->loader->add_action( 'wp_ajax_ai_blog_posts_generate_from_queue', $plugin_admin, 'ajax_generate_from_queue' );
@@ -280,6 +281,10 @@ class Ai_Blog_Posts {
 
 		// Scheduled generation hook
 		$this->loader->add_action( 'ai_blog_posts_scheduled_generation', $scheduler, 'run_scheduled_generation' );
+
+		// Fallback: Check on every page load if scheduled time has passed (catches missed cron events)
+		// This ensures generation happens even if WordPress cron is delayed
+		$this->loader->add_action( 'init', $scheduler, 'maybe_trigger_scheduled_generation', 20 );
 
 		// Trending topics refresh hook
 		$this->loader->add_action( 'ai_blog_posts_trending_refresh', $trends, 'cron_refresh' );

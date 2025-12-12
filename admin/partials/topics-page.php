@@ -95,16 +95,6 @@ $status_counts = array(
 		<!-- Bulk Actions -->
 		<div class="topics-actions">
 			<div class="actions-left">
-				<button type="button" id="fetch-trending" class="button">
-					<span class="dashicons dashicons-trending-up"></span>
-					<?php esc_html_e( 'Fetch Trending Topics', 'ai-blog-posts' ); ?>
-				</button>
-				<button type="button" id="bulk-import" class="button">
-					<span class="dashicons dashicons-upload"></span>
-					<?php esc_html_e( 'Import from CSV', 'ai-blog-posts' ); ?>
-				</button>
-			</div>
-			<div class="actions-right">
 				<select id="bulk-action">
 					<option value=""><?php esc_html_e( 'Bulk Actions', 'ai-blog-posts' ); ?></option>
 					<option value="delete"><?php esc_html_e( 'Delete', 'ai-blog-posts' ); ?></option>
@@ -112,6 +102,16 @@ $status_counts = array(
 				</select>
 				<button type="button" id="apply-bulk" class="button">
 					<?php esc_html_e( 'Apply', 'ai-blog-posts' ); ?>
+				</button>
+			</div>
+			<div class="actions-right">
+				<button type="button" id="fetch-trending" class="button">
+					<span class="dashicons dashicons-trending-up"></span>
+					<?php esc_html_e( 'Fetch Trending Topics', 'ai-blog-posts' ); ?>
+				</button>
+				<button type="button" id="bulk-import" class="button">
+					<span class="dashicons dashicons-upload"></span>
+					<?php esc_html_e( 'Import from CSV', 'ai-blog-posts' ); ?>
 				</button>
 			</div>
 		</div>
@@ -183,17 +183,28 @@ $status_counts = array(
 							<td class="column-topic">
 								<strong><?php echo esc_html( $topic->topic ); ?></strong>
 								<div class="row-actions">
+									<?php if ( 'pending' === $topic->status || 'failed' === $topic->status ) : ?>
+										<span class="edit-topic">
+											<a href="#" class="edit-topic-link" data-id="<?php echo esc_attr( $topic->id ); ?>" 
+											   data-topic="<?php echo esc_attr( $topic->topic ); ?>"
+											   data-keywords="<?php echo esc_attr( $topic->keywords ); ?>"
+											   data-category="<?php echo esc_attr( $topic->category_id ); ?>"
+											   data-priority="<?php echo esc_attr( $topic->priority ); ?>">
+												<?php esc_html_e( 'Edit', 'ai-blog-posts' ); ?>
+											</a> | 
+										</span>
+									<?php endif; ?>
 									<?php if ( 'pending' === $topic->status ) : ?>
 										<span class="generate">
 											<a href="#" class="generate-topic" data-id="<?php echo esc_attr( $topic->id ); ?>">
 												<?php esc_html_e( 'Generate', 'ai-blog-posts' ); ?>
-											</a> |
+											</a> | 
 										</span>
 									<?php elseif ( 'failed' === $topic->status ) : ?>
 										<span class="retry">
 											<a href="#" class="retry-topic" data-id="<?php echo esc_attr( $topic->id ); ?>">
 												<?php esc_html_e( 'Retry', 'ai-blog-posts' ); ?>
-											</a> |
+											</a> | 
 										</span>
 									<?php elseif ( 'generating' === $topic->status ) : ?>
 										<span class="generating-text">
@@ -205,12 +216,12 @@ $status_counts = array(
 										<span class="view">
 											<a href="<?php echo esc_url( get_permalink( $topic->post_id ) ); ?>" target="_blank">
 												<?php esc_html_e( 'View Post', 'ai-blog-posts' ); ?>
-											</a> |
+											</a> | 
 										</span>
-										<span class="edit">
+										<span class="edit-post">
 											<a href="<?php echo esc_url( get_edit_post_link( $topic->post_id ) ); ?>">
-												<?php esc_html_e( 'Edit', 'ai-blog-posts' ); ?>
-											</a> |
+												<?php esc_html_e( 'Edit Post', 'ai-blog-posts' ); ?>
+											</a> | 
 										</span>
 									<?php endif; ?>
 									<?php if ( 'generating' !== $topic->status ) : ?>
@@ -347,6 +358,55 @@ $status_counts = array(
 				<div class="modal-footer">
 					<button type="button" class="button modal-cancel"><?php esc_html_e( 'Cancel', 'ai-blog-posts' ); ?></button>
 					<button type="button" id="add-selected-trends" class="button button-primary"><?php esc_html_e( 'Add Selected', 'ai-blog-posts' ); ?></button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Edit Topic Modal -->
+		<div id="edit-topic-modal" class="ai-blog-posts-modal" style="display: none;">
+			<div class="modal-content">
+				<div class="modal-header">
+					<h2><?php esc_html_e( 'Edit Topic', 'ai-blog-posts' ); ?></h2>
+					<button type="button" class="modal-close">&times;</button>
+				</div>
+				<div class="modal-body">
+					<form id="edit-topic-form" class="ai-blog-posts-form">
+						<?php wp_nonce_field( 'ai_blog_posts_nonce', 'ai_blog_posts_nonce' ); ?>
+						<input type="hidden" id="edit-topic-id" name="topic_id" value="">
+						
+						<div class="form-field">
+							<label for="edit-topic-title"><?php esc_html_e( 'Topic', 'ai-blog-posts' ); ?> <span class="required">*</span></label>
+							<input type="text" id="edit-topic-title" name="topic" required>
+						</div>
+						
+						<div class="form-field">
+							<label for="edit-topic-keywords"><?php esc_html_e( 'Keywords', 'ai-blog-posts' ); ?></label>
+							<input type="text" id="edit-topic-keywords" name="keywords" placeholder="<?php esc_attr_e( 'Comma-separated keywords', 'ai-blog-posts' ); ?>">
+							<p class="description"><?php esc_html_e( 'Optional: Enter keywords separated by commas', 'ai-blog-posts' ); ?></p>
+						</div>
+						
+						<div class="form-field">
+							<label for="edit-topic-category"><?php esc_html_e( 'Category', 'ai-blog-posts' ); ?></label>
+							<select id="edit-topic-category" name="category_id">
+								<option value=""><?php esc_html_e( '— Select —', 'ai-blog-posts' ); ?></option>
+								<?php foreach ( $categories as $category ) : ?>
+									<option value="<?php echo esc_attr( $category->term_id ); ?>">
+										<?php echo esc_html( $category->name ); ?>
+									</option>
+								<?php endforeach; ?>
+							</select>
+						</div>
+						
+						<div class="form-field">
+							<label for="edit-topic-priority"><?php esc_html_e( 'Priority', 'ai-blog-posts' ); ?></label>
+							<input type="number" id="edit-topic-priority" name="priority" min="0" max="100" value="0">
+							<p class="description"><?php esc_html_e( 'Priority from 0-100 (higher = processed sooner)', 'ai-blog-posts' ); ?></p>
+						</div>
+					</form>
+				</div>
+				<div class="modal-footer">
+					<button type="button" class="button modal-cancel"><?php esc_html_e( 'Cancel', 'ai-blog-posts' ); ?></button>
+					<button type="button" id="save-topic-edit" class="button button-primary"><?php esc_html_e( 'Update Topic', 'ai-blog-posts' ); ?></button>
 				</div>
 			</div>
 		</div>

@@ -144,7 +144,7 @@ class Ai_Blog_Posts_Admin {
 	 * @since    1.0.0
 	 */
 	public function add_admin_menu() {
-		// Main menu
+		// Main menu (position 4 to appear above Posts which is 5)
 		add_menu_page(
 			__( 'AI Blog Posts', 'ai-blog-posts' ),
 			__( 'AI Blog Posts', 'ai-blog-posts' ),
@@ -152,7 +152,7 @@ class Ai_Blog_Posts_Admin {
 			'ai-blog-posts',
 			array( $this, 'render_dashboard_page' ),
 			'dashicons-edit-page',
-			30
+			4
 		);
 
 		// Dashboard submenu (same as main)
@@ -311,10 +311,18 @@ class Ai_Blog_Posts_Admin {
 		);
 
 		$saved = array();
+		$schedule_changed = false;
+		
 		foreach ( $settings as $key => $value ) {
 			// Skip API key if empty (don't overwrite existing)
 			if ( 'api_key' === $key && empty( $value ) ) {
 				continue;
+			}
+
+			// Track if schedule settings changed
+			if ( in_array( $key, array( 'schedule_enabled', 'schedule_frequency', 'schedule_time' ), true ) ) {
+				$old_value = Ai_Blog_Posts_Settings::get( $key );
+				$schedule_changed = $schedule_changed || ( $old_value !== $value );
 			}
 
 			// Handle boolean values - convert string "true"/"false" to actual booleans
@@ -335,6 +343,16 @@ class Ai_Blog_Posts_Admin {
 			if ( Ai_Blog_Posts_Settings::set( $key, $value ) ) {
 				$saved[] = $key;
 			}
+		}
+
+		// Reschedule cron if schedule settings changed
+		if ( $schedule_changed ) {
+			// Set cooldown to prevent immediate generation when settings are saved
+			$cooldown_end = time() + ( 5 * MINUTE_IN_SECONDS );
+			set_transient( 'ai_blog_posts_schedule_cooldown', $cooldown_end, 10 * MINUTE_IN_SECONDS );
+			
+			$scheduler = new Ai_Blog_Posts_Scheduler();
+			$scheduler->reschedule();
 		}
 
 		wp_send_json_success( array(
@@ -624,6 +642,69 @@ class Ai_Blog_Posts_Admin {
 			) );
 		} else {
 			wp_send_json_error( array( 'message' => __( 'Failed to add topic.', 'ai-blog-posts' ) ) );
+		}
+	}
+
+	/**
+	 * AJAX handler: Update topic in queue.
+	 *
+	 * @since    1.0.0
+	 */
+	public function ajax_update_topic() {
+		check_ajax_referer( 'ai_blog_posts_nonce', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'ai-blog-posts' ) ) );
+		}
+
+		$topic_id = isset( $_POST['topic_id'] ) ? absint( $_POST['topic_id'] ) : 0;
+		$topic = isset( $_POST['topic'] ) ? sanitize_text_field( wp_unslash( $_POST['topic'] ) ) : '';
+		$keywords = isset( $_POST['keywords'] ) ? sanitize_text_field( wp_unslash( $_POST['keywords'] ) ) : '';
+		$category_id = isset( $_POST['category_id'] ) ? absint( $_POST['category_id'] ) : 0;
+		$priority = isset( $_POST['priority'] ) ? absint( $_POST['priority'] ) : 0;
+
+		if ( ! $topic_id ) {
+			wp_send_json_error( array( 'message' => __( 'Invalid topic ID.', 'ai-blog-posts' ) ) );
+		}
+
+		if ( empty( $topic ) ) {
+			wp_send_json_error( array( 'message' => __( 'Topic is required.', 'ai-blog-posts' ) ) );
+		}
+
+		// Ensure priority is within valid range
+		$priority = max( 0, min( 100, $priority ) );
+
+		global $wpdb;
+		$table = $wpdb->prefix . 'ai_blog_posts_topics';
+
+		// Check if topic exists
+		$existing = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $table WHERE id = %d", $topic_id ) );
+		if ( ! $existing ) {
+			wp_send_json_error( array( 'message' => __( 'Topic not found.', 'ai-blog-posts' ) ) );
+		}
+
+		// Only allow editing if topic is pending or failed (not processing or completed)
+		if ( ! in_array( $existing->status, array( 'pending', 'failed' ), true ) ) {
+			wp_send_json_error( array( 'message' => __( 'Only pending or failed topics can be edited.', 'ai-blog-posts' ) ) );
+		}
+
+		$updated = $wpdb->update(
+			$table,
+			array(
+				'topic'       => $topic,
+				'keywords'    => $keywords,
+				'category_id' => $category_id,
+				'priority'    => $priority,
+			),
+			array( 'id' => $topic_id ),
+			array( '%s', '%s', '%d', '%d' ),
+			array( '%d' )
+		);
+
+		if ( false !== $updated ) {
+			wp_send_json_success( array( 'message' => __( 'Topic updated successfully.', 'ai-blog-posts' ) ) );
+		} else {
+			wp_send_json_error( array( 'message' => __( 'Failed to update topic.', 'ai-blog-posts' ) ) );
 		}
 	}
 

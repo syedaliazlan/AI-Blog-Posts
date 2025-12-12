@@ -179,9 +179,9 @@ class Ai_Blog_Posts_Activator {
 	 * @since    1.0.0
 	 */
 	private static function schedule_cron_events() {
-		if ( ! wp_next_scheduled( 'ai_blog_posts_scheduled_generation' ) ) {
-			wp_schedule_event( time(), 'hourly', 'ai_blog_posts_scheduled_generation' );
-		}
+		// Use reschedule method to ensure proper setup
+		$scheduler = new Ai_Blog_Posts_Scheduler();
+		$scheduler->reschedule();
 
 		if ( ! wp_next_scheduled( 'ai_blog_posts_trending_refresh' ) ) {
 			wp_schedule_event( time(), 'twicedaily', 'ai_blog_posts_trending_refresh' );

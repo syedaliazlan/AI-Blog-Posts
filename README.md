@@ -35,13 +35,18 @@ Automatically generate and publish high-quality, SEO-optimized blog posts using 
 - **Smart NO-TEXT prompts** - Images without text/watermarks
 - **Visual concept mapping** - Automatically matches images to content topics
 - **Professional quality** - HD, natural style, rule-of-thirds composition
+- **Automatic generation** - Featured images are generated for both manual and scheduled posts
 
 ### 📅 Scheduling & Automation
 - **Automated posting** on customizable schedules (hourly, daily, weekly)
+- **WordPress timezone support** - scheduling uses your WordPress timezone settings
+- **Duplicate prevention** - intelligent locking prevents duplicate post generation
 - **Topic queue management** with priority ordering
+- **Automatic recovery** - stuck topics are automatically reset after timeout
 - **CSV import** for bulk topic upload
 - **Google Trends integration** for trending topic suggestions
 - **Daily post limits** and budget controls
+- **Error handling** - topics are properly marked even if generation fails
 
 ### 🔍 SEO Integration
 - **Auto-generate meta descriptions** and focus keywords
@@ -109,9 +114,12 @@ Automatically generate and publish high-quality, SEO-optimized blog posts using 
 
 1. Enable scheduled posting in Settings
 2. Set frequency (hourly, daily, weekly)
-3. Configure preferred posting time
+3. Configure preferred posting time (uses WordPress timezone)
 4. Set maximum posts per day
 5. Add topics to the queue
+6. The system will automatically process topics and prevent duplicates
+
+**Note**: Scheduled times use your WordPress timezone settings, not server time. The plugin includes built-in duplicate prevention and automatic recovery for stuck topics.
 
 ### SEO Configuration
 
@@ -136,6 +144,8 @@ Automatically generate and publish high-quality, SEO-optimized blog posts using 
 3. Set priorities (0-100, higher = sooner)
 4. Enable scheduled posting
 5. Topics will be processed automatically
+6. Topics stuck in "processing" status are automatically reset after 30 minutes
+7. Failed topics can be retried (up to 3 attempts)
 
 ### CSV Import Format
 

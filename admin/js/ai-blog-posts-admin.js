@@ -55,7 +55,9 @@
 			// Topics
 			$('#add-topic-form').on('submit', this.addTopic.bind(this));
 			$(document).on('click', '.delete-topic', this.deleteTopic.bind(this));
+			$(document).on('click', '.edit-topic-link', this.editTopic.bind(this));
 			$(document).on('click', '.generate-topic, .retry-topic', this.generateFromTopic.bind(this));
+			$('#save-topic-edit').on('click', this.saveTopicEdit.bind(this));
 			$('#fetch-trending').on('click', this.fetchTrending.bind(this));
 			$('#add-selected-trends').on('click', this.addSelectedTrends.bind(this));
 			$('#select-all-topics').on('change', this.toggleAllTopics);
@@ -68,7 +70,9 @@
 
 			// Modals
 			$('#bulk-import').on('click', function() { $('#csv-import-modal').show(); });
-			$('.modal-close, .modal-cancel').on('click', function() { $(this).closest('.ai-blog-posts-modal').hide(); });
+			$('.modal-close, .modal-cancel').on('click', function() { 
+				$(this).closest('.ai-blog-posts-modal').hide(); 
+			});
 
 			// CSV Import
 			$('#do-csv-import').on('click', this.importCsv.bind(this));
@@ -114,12 +118,40 @@
 			// Schedule settings toggle
 			$('#schedule_enabled').on('change', function() {
 				$('.schedule-settings').toggle($(this).is(':checked'));
+				// Also update time field visibility when schedule is toggled
+				if ($(this).is(':checked')) {
+					AIBlogPosts.updateScheduleTimeVisibility();
+				}
 			});
+
+			// Schedule frequency change - hide time field for hourly
+			$('#schedule_frequency').on('change', this.updateScheduleTimeVisibility.bind(this));
+
+			// Initial check on page load
+			this.updateScheduleTimeVisibility();
 
 			// Trending settings toggle
 			$('#trending_enabled').on('change', function() {
 				$('.trending-settings').toggle($(this).is(':checked'));
 			});
+		},
+
+		/**
+		 * Update schedule time field visibility based on frequency
+		 */
+		updateScheduleTimeVisibility: function() {
+			const frequency = $('#schedule_frequency').val();
+			const $timeRow = $('.schedule-time-row');
+			const scheduleEnabled = $('#schedule_enabled').is(':checked');
+			
+			// Hide time field for hourly frequency (doesn't make sense)
+			// Also hide if schedule is disabled
+			if (frequency === 'hourly' || !scheduleEnabled) {
+				$timeRow.hide();
+			} else {
+				// Show time field for other frequencies when schedule is enabled
+				$timeRow.show();
+			}
 		},
 
 		/**
@@ -565,6 +597,78 @@
 				},
 				complete: function() {
 					$button.prop('disabled', false);
+				}
+			});
+		},
+
+		/**
+		 * Edit topic - open modal with topic data
+		 */
+		editTopic: function(e) {
+			e.preventDefault();
+
+			const $link = $(e.target).closest('.edit-topic-link');
+			const topicId = $link.data('id');
+			const topic = $link.data('topic');
+			const keywords = $link.data('keywords') || '';
+			const category = $link.data('category') || '';
+			const priority = $link.data('priority') || 0;
+
+			// Populate edit form
+			$('#edit-topic-id').val(topicId);
+			$('#edit-topic-title').val(topic);
+			$('#edit-topic-keywords').val(keywords);
+			$('#edit-topic-category').val(category);
+			$('#edit-topic-priority').val(priority);
+
+			// Show modal
+			$('#edit-topic-modal').show();
+		},
+
+		/**
+		 * Save topic edit
+		 */
+		saveTopicEdit: function(e) {
+			e.preventDefault();
+
+			const $button = $('#save-topic-edit');
+			const $form = $('#edit-topic-form');
+
+			// Validate
+			const topic = $('#edit-topic-title').val().trim();
+			if (!topic) {
+				alert('Topic is required.');
+				return;
+			}
+
+			$button.prop('disabled', true).text('Updating...');
+
+			$.ajax({
+				url: aiBlogPosts.ajaxUrl,
+				type: 'POST',
+				data: {
+					action: 'ai_blog_posts_update_topic',
+					nonce: aiBlogPosts.nonce,
+					topic_id: $('#edit-topic-id').val(),
+					topic: topic,
+					keywords: $('#edit-topic-keywords').val().trim(),
+					category_id: $('#edit-topic-category').val() || 0,
+					priority: $('#edit-topic-priority').val() || 0
+				},
+				success: function(response) {
+					if (response.success) {
+						// Close modal
+						$('#edit-topic-modal').hide();
+						// Reload page to show updated data
+						location.reload();
+					} else {
+						alert('Error: ' + response.data.message);
+						$button.prop('disabled', false).text('Update Topic');
+					}
+				},
+				error: function() {
+					alert('Connection error.');
+					$button.prop('disabled', false).text('Update Topic');
 				}
 			});
 		},

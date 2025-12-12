@@ -845,7 +845,33 @@ class Ai_Blog_Posts_Generator {
 			);
 		}
 
+		// Clean up title suggestion lines from content
+		$content = $this->clean_title_suggestions( $content );
+
 		return $content;
+	}
+
+	/**
+	 * Clean title suggestion lines from content.
+	 * 
+	 * Removes lines like "Title suggestion: ..." that shouldn't be in the post body.
+	 *
+	 * @since    1.0.0
+	 * @param    string $content    Content to clean.
+	 * @return   string             Cleaned content.
+	 */
+	private function clean_title_suggestions( $content ) {
+		// Remove lines that start with "Title suggestion:", "Title:", "Suggested title:", etc.
+		// This pattern matches the label and everything after it on the same line
+		$content = preg_replace( '/^(?:title\s+suggestion|suggested\s+title|title)[:\s]+.*$/mi', '', $content );
+		
+		// Remove HTML paragraphs that contain only title suggestions
+		$content = preg_replace( '/<p[^>]*>(?:title\s+suggestion|suggested\s+title|title)[:\s]+.*?<\/p>/i', '', $content );
+		
+		// Clean up multiple consecutive newlines that result from removals
+		$content = preg_replace( '/\n{3,}/', "\n\n", $content );
+		
+		return trim( $content );
 	}
 
 	/**
@@ -1001,6 +1027,9 @@ class Ai_Blog_Posts_Generator {
 		// Remove any markdown code fences
 		$content = preg_replace( '/```html?\s*/', '', $content );
 		$content = preg_replace( '/```\s*/', '', $content );
+
+		// Clean title suggestions (as a backup, in case they weren't removed earlier)
+		$content = $this->clean_title_suggestions( $content );
 
 		// Convert paragraphs to Gutenberg blocks
 		$content = preg_replace(
