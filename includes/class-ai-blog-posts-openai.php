@@ -48,14 +48,6 @@ class Ai_Blog_Posts_OpenAI {
 	private const TIMEOUT = 300; // 5 minutes for longer generations
 
 	/**
-	 * Current request timeout (used by cURL filter).
-	 *
-	 * @since    1.0.0
-	 * @var      int
-	 */
-	private $current_request_timeout = 180;
-
-	/**
 	 * The API key.
 	 *
 	 * @since    1.0.0
@@ -125,31 +117,6 @@ class Ai_Blog_Posts_OpenAI {
 		self::$global_call_count = (int) get_option( 'ai_blog_posts_total_api_calls', 0 );
 	}
 
-	/**
-	 * Debug logging helper for instrumentation.
-	 *
-	 * @since    1.0.0
-	 * @param    string $location     Log location identifier.
-	 * @param    string $hypothesis   Hypothesis ID(s) this log tests.
-	 * @param    string $message      Log message.
-	 * @param    array  $data         Additional data to log.
-	 */
-	private function debug_log( $location, $hypothesis, $message, $data = array() ) {
-		$log_path = dirname( __DIR__ ) . '/.cursor/debug.log';
-		$log_dir = dirname( $log_path );
-		if ( ! is_dir( $log_dir ) ) {
-			@mkdir( $log_dir, 0755, true );
-		}
-		$entry = array(
-			'timestamp' => gmdate( 'c' ),
-			'location' => 'class-ai-blog-posts-openai.php:' . $location,
-			'hypothesisId' => $hypothesis,
-			'message' => $message,
-			'data' => $data,
-			'sessionId' => 'debug-session',
-		);
-		@file_put_contents( $log_path, wp_json_encode( $entry ) . "\n", FILE_APPEND | LOCK_EX );
-	}
 	
 	/**
 	 * Get the number of API calls made in this session.
@@ -991,59 +958,11 @@ class Ai_Blog_Posts_OpenAI {
 	}
 
 	/**
-	 * Configure cURL options for long-running API requests.
-	 *
-	 * This callback is attached to the 'http_api_curl' filter to ensure
-	 * proper timeout settings are applied at the cURL level.
-	 *
-	 * @since    1.0.0
-	 * @param    resource $handle     cURL handle.
-	 * @param    array    $parsed_args Parsed request arguments.
-	 * @param    string   $url         Request URL.
-	 * @return   void
-	 */
-	public function configure_curl_for_openai( $handle, $parsed_args, $url ) {
-		// Only apply to OpenAI API requests
-		if ( strpos( $url, 'api.openai.com' ) === false ) {
-			return;
-		}
-
-		// #region agent log
-		$this->debug_log('curl_callback_fired', 'A', 'cURL callback executed - WordPress IS using cURL', array(
-			'url' => $url,
-			'timeout' => $this->current_request_timeout,
-			'handle_type' => gettype($handle),
-			'curl_version' => function_exists('curl_version') ? curl_version()['version'] : 'unknown',
-		));
-		// #endregion
-
-		$timeout = $this->current_request_timeout;
-
-		// Set cURL timeout options explicitly
-		curl_setopt( $handle, CURLOPT_TIMEOUT, $timeout );
-		curl_setopt( $handle, CURLOPT_CONNECTTIMEOUT, 30 ); // 30 seconds to connect
-		
-		// Disable cURL's internal timeout for slow responses
-		curl_setopt( $handle, CURLOPT_LOW_SPEED_LIMIT, 1 ); // 1 byte per second minimum
-		curl_setopt( $handle, CURLOPT_LOW_SPEED_TIME, $timeout ); // For the duration of timeout
-		
-		// Ensure we get the full response
-		curl_setopt( $handle, CURLOPT_RETURNTRANSFER, true );
-		
-		// CRITICAL FIX: Request uncompressed responses to avoid decompression issues
-		// Some hosting environments (Hostinger + Cloudflare) don't properly decompress
-		// Setting to 'identity' tells the server to send uncompressed data
-		// Note: We set Accept-Encoding: identity in the request headers, and also
-		// set CURLOPT_ENCODING to empty string to ensure cURL handles any encoding
-		curl_setopt( $handle, CURLOPT_ENCODING, '' );
-
-		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-			error_log( sprintf( 'AI Blog Posts: [cURL] Configured timeout=%ds, connect_timeout=30s for OpenAI request', $timeout ) );
-		}
-	}
-
-	/**
 	 * Make an API request.
+	 * 
+	 * SIMPLIFIED VERSION - Uses basic wp_remote_request like v1.0.0
+	 * The over-engineered version with cURL callbacks was causing empty response issues
+	 * on Hostinger/Cloudflare setups.
 	 *
 	 * @since    1.0.0
 	 * @param    string $method     HTTP method.
@@ -1055,15 +974,6 @@ class Ai_Blog_Posts_OpenAI {
 	private function make_request( $method, $endpoint, $body = array(), $api_key = null ) {
 		$key = $api_key ?? $this->api_key;
 
-		// #region agent log
-		$this->debug_log('make_request_entry', 'A', 'Entering make_request', array(
-			'endpoint' => $endpoint,
-			'method' => $method,
-			'api_key_length' => strlen($key ?? ''),
-			'api_key_prefix' => substr($key ?? '', 0, 10) . '...',
-		));
-		// #endregion
-
 		if ( empty( $key ) ) {
 			return new WP_Error(
 				'missing_api_key',
@@ -1071,44 +981,21 @@ class Ai_Blog_Posts_OpenAI {
 			);
 		}
 
+		// Simple headers - no Accept-Encoding override (let WordPress handle it)
 		$headers = array(
 			'Authorization' => 'Bearer ' . $key,
 			'Content-Type'  => 'application/json',
-			// Request identity encoding (no compression) to avoid decompression issues on some hosts
-			// Some Hostinger/Cloudflare setups don't properly decompress gzip responses
-			'Accept-Encoding' => 'identity',
 		);
 
 		if ( ! empty( $this->org_id ) ) {
 			$headers['OpenAI-Organization'] = $this->org_id;
 		}
 
-		// Set appropriate timeout based on endpoint
-		$timeout = self::TIMEOUT; // Default 300 seconds
-		if ( '/chat/completions' === $endpoint ) {
-			// GPT-5.2 can take longer, especially with reasoning tokens
-			// Use 180 seconds (3 minutes) to ensure complete responses
-			$timeout = 180;
-		}
-
-		// Store timeout for cURL callback and add the filter
-		$this->current_request_timeout = $timeout;
-		add_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10, 3 );
-
+		// Simple args - just like v1.0.0 that worked
 		$args = array(
-			'method'      => $method,
-			'headers'     => $headers,
-			'timeout'     => $timeout,
-			'redirection' => 5,
-			'httpversion' => '1.1',
-			'blocking'    => true,
-			'sslverify'   => true,
-			// Add user agent to help with connection issues
-			'user-agent'  => 'WordPress/' . get_bloginfo( 'version' ) . '; ' . home_url(),
-			// Increase stream reading timeout for large responses
-			'stream'      => false,
-			// Force decompression of response
-			'decompress'  => true,
+			'method'  => $method,
+			'headers' => $headers,
+			'timeout' => self::TIMEOUT,
 		);
 
 		if ( ! empty( $body ) && 'GET' !== $method ) {
@@ -1117,21 +1004,10 @@ class Ai_Blog_Posts_OpenAI {
 
 		$url = self::API_BASE . $endpoint;
 
-		// #region agent log
-		$this->debug_log('request_config', 'A,B', 'Request configuration', array(
-			'url' => $url,
-			'timeout' => $timeout,
-			'headers_keys' => array_keys($headers),
-			'has_body' => !empty($body),
-			'decompress' => $args['decompress'],
-		));
-		// #endregion
-
 		// Retry logic
 		$attempts = 0;
 		$last_error = null;
 		$last_http_code = null;
-		$last_response_body = null;
 
 		while ( $attempts < self::MAX_RETRIES ) {
 			$attempts++;
@@ -1143,115 +1019,13 @@ class Ai_Blog_Posts_OpenAI {
 			
 			// Log attempt for debugging
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				error_log( sprintf( 'AI Blog Posts: API request attempt %d to %s (timeout: %ds, session calls: %d)', $attempts, $endpoint, $timeout, $this->api_call_count ) );
+				error_log( sprintf( 'AI Blog Posts: API request attempt %d to %s', $attempts, $endpoint ) );
 			}
 			
-			$request_start = microtime( true );
-			
-			// Enforce timeout for chat completions on shared hosting
-			// wp_remote_request() may not respect timeouts on some shared hosts
-			if ( '/chat/completions' === $endpoint ) {
-				// Set max execution time to timeout + buffer
-				$max_execution_time = $timeout + 10; // Add 10 second buffer
-				@set_time_limit( $max_execution_time );
-				
-				// Store initial execution time limit for restoration
-				$initial_time_limit = ini_get( 'max_execution_time' );
-				
-				// Make the request
-				$response = wp_remote_request( $url, $args );
-				$request_duration = microtime( true ) - $request_start;
-				
-				// Restore original time limit if it was set
-				if ( $initial_time_limit ) {
-					@set_time_limit( $initial_time_limit );
-				}
-				
-				// Check if request took longer than timeout (indicates potential hang)
-				// For chat completions, if it takes more than timeout + 10s buffer, treat as timeout
-				$max_allowed_time = $timeout + 10;
-				
-				if ( $request_duration > $max_allowed_time ) {
-					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-						error_log( sprintf( 
-							'AI Blog Posts: WARNING - Request to %s took %.2f seconds (timeout: %ds, max allowed: %ds), treating as timeout', 
-							$endpoint, 
-							$request_duration, 
-							$timeout,
-							$max_allowed_time
-						) );
-					}
-					
-					// Treat as timeout - return error immediately
-					$last_error = new WP_Error( 
-						'request_timeout', 
-						sprintf( 
-							__( 'Request to %s exceeded maximum allowed time (%.1f seconds). This may indicate a network issue or server overload. Please try again.', 'ai-blog-posts' ),
-							$endpoint,
-							$request_duration
-						),
-						array( 'duration' => $request_duration, 'timeout' => $timeout )
-					);
-					
-					// Return error immediately
-					remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
-					return $last_error;
-				}
-				
-				// If we got an error and it took too long, treat it as a timeout
-				if ( is_wp_error( $response ) ) {
-					$error_message = $response->get_error_message();
-					if ( strpos( strtolower( $error_message ), 'timeout' ) === false && 
-					     strpos( strtolower( $error_message ), 'timed out' ) === false ) {
-						// If it took a long time, treat as timeout
-						if ( $request_duration > ( $timeout * 0.8 ) ) {
-							$last_error = new WP_Error( 
-								'request_timeout', 
-								sprintf( 
-									__( 'Request to %s failed after %.1f seconds (likely timeout). Please try again.', 'ai-blog-posts' ),
-									$endpoint,
-									$request_duration
-								)
-							);
-							if ( $attempts < self::MAX_RETRIES ) {
-								sleep( pow( 2, $attempts ) );
-								continue;
-							}
-							remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
-							return $last_error;
-						}
-					}
-				}
-			} else {
-				// For other endpoints, use standard request
-				// Set execution time limit for the request
-				@set_time_limit( $timeout + 10 );
-				$response = wp_remote_request( $url, $args );
-				$request_duration = microtime( true ) - $request_start;
-			}
-			
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				error_log( sprintf( 'AI Blog Posts: API request completed in %.2f seconds', $request_duration ) );
-			}
-
-			// #region agent log
-			$this->debug_log('after_request', 'A,B,C,D,E', 'Response received from wp_remote_request', array(
-				'is_wp_error' => is_wp_error($response),
-				'response_type' => gettype($response),
-				'attempt' => $attempts,
-				'duration' => $request_duration,
-			));
-			// #endregion
+			$response = wp_remote_request( $url, $args );
 
 			if ( is_wp_error( $response ) ) {
 				$last_error = $response;
-				
-				// #region agent log
-				$this->debug_log('wp_error', 'D,E', 'WP_Error received', array(
-					'error_code' => $response->get_error_code(),
-					'error_message' => $response->get_error_message(),
-				));
-				// #endregion
 				
 				// Log the error
 				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -1271,193 +1045,49 @@ class Ai_Blog_Posts_OpenAI {
 			}
 
 			$code = wp_remote_retrieve_response_code( $response );
-			$body = wp_remote_retrieve_body( $response );
+			$response_body = wp_remote_retrieve_body( $response );
 			
-			// Check response headers for content length (using array access, not get() method)
-			$headers = wp_remote_retrieve_headers( $response );
-			// Handle both array and Requests_Utility_CaseInsensitiveDictionary objects
-			$headers_array = is_object( $headers ) ? $headers->getAll() : (array) $headers;
-			$content_length = isset( $headers_array['content-length'] ) ? $headers_array['content-length'] : null;
-			$content_encoding = isset( $headers_array['content-encoding'] ) ? $headers_array['content-encoding'] : 'none';
-			
-			// #region agent log
-			$this->debug_log('response_details', 'A,B,C', 'Response details extracted', array(
-				'http_code' => $code,
-				'body_length' => strlen($body),
-				'body_empty' => empty($body),
-				'content_length_header' => $content_length,
-				'content_encoding' => $content_encoding,
-				'headers_count' => count($headers_array),
-				'all_headers' => array_keys($headers_array),
-				'body_first_50_chars' => substr($body, 0, 50),
-				'body_is_binary' => !mb_check_encoding($body, 'UTF-8'),
-			));
-			// #endregion
-			
-			// CRITICAL FIX: Handle compressed responses that weren't decompressed
-			// This occurs on some Hostinger/Cloudflare setups where CURLOPT_ENCODING doesn't work
-			if ( empty( $body ) && $content_length && (int) $content_length > 0 ) {
-				// Try to get raw response body from the response array
-				$raw_body = isset( $response['body'] ) ? $response['body'] : '';
-				
-				// #region agent log
-				$this->debug_log('compression_fallback', 'B,C', 'Attempting compression fallback', array(
-					'raw_body_length' => strlen($raw_body),
-					'content_encoding' => $content_encoding,
-				));
-				// #endregion
-				
-				if ( ! empty( $raw_body ) ) {
-					// Try gzip decompression
-					if ( function_exists( 'gzdecode' ) ) {
-						$decoded = @gzdecode( $raw_body );
-						if ( $decoded !== false ) {
-							$body = $decoded;
-						}
-					}
-					// Try zlib decompression (deflate)
-					if ( empty( $body ) && function_exists( 'gzinflate' ) ) {
-						$decoded = @gzinflate( $raw_body );
-						if ( $decoded !== false ) {
-							$body = $decoded;
-						}
-					}
-					// Try raw inflate
-					if ( empty( $body ) && function_exists( 'gzuncompress' ) ) {
-						$decoded = @gzuncompress( $raw_body );
-						if ( $decoded !== false ) {
-							$body = $decoded;
-						}
-					}
-				}
-			}
-			
+			// Log response for debugging
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				error_log( sprintf( 'AI Blog Posts: [make_request] HTTP %d response from %s', $code, $endpoint ) );
-				error_log( sprintf( 'AI Blog Posts: [make_request] Response body length: %d', strlen( $body ) ) );
-				if ( $content_length ) {
-					$expected_length = (int) $content_length;
-					$actual_length = strlen( $body );
-					if ( $actual_length < $expected_length ) {
-						error_log( sprintf( 'AI Blog Posts: [make_request] WARNING - Response truncated! Expected: %d bytes, Got: %d bytes', $expected_length, $actual_length ) );
-					}
-				}
+				error_log( sprintf( 'AI Blog Posts: HTTP %d response from %s, body length: %d', $code, $endpoint, strlen( $response_body ) ) );
 			}
 			
-			// Check if body is empty
-			if ( empty( $body ) ) {
-				// #region agent log
-				$this->debug_log('empty_body_error', 'B,C', 'Empty response body - about to return error', array(
-					'http_code' => $code,
-					'attempt' => $attempts,
-					'will_retry' => $attempts < self::MAX_RETRIES,
-					'raw_response_keys' => is_array($response) ? array_keys($response) : 'not_array',
-				));
-				// #endregion
+			// Check for empty body with expected content
+			if ( empty( $response_body ) ) {
+				$headers_obj = wp_remote_retrieve_headers( $response );
+				$content_length = null;
+				if ( is_object( $headers_obj ) && method_exists( $headers_obj, 'offsetGet' ) ) {
+					$content_length = $headers_obj->offsetGet( 'content-length' );
+				} elseif ( is_array( $headers_obj ) ) {
+					$content_length = isset( $headers_obj['content-length'] ) ? $headers_obj['content-length'] : null;
+				}
+				
+				if ( $content_length && (int) $content_length > 0 ) {
+					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+						error_log( sprintf( 'AI Blog Posts: WARNING - Empty body but Content-Length: %s. Possible decompression issue.', $content_length ) );
+					}
+				}
 				
 				$last_error = new WP_Error(
 					'empty_response',
-					__( 'Empty response body received from OpenAI API.', 'ai-blog-posts' ),
-					array( 'http_code' => $code )
+					__( 'Empty response body received from OpenAI API. This may be a server configuration issue.', 'ai-blog-posts' ),
+					array( 'http_code' => $code, 'content_length' => $content_length )
 				);
+				
 				if ( $attempts < self::MAX_RETRIES ) {
 					sleep( pow( 2, $attempts ) );
 					continue;
 				}
-				return $last_error;
+				break;
 			}
 			
-			// Try to decode JSON
-			$data = json_decode( $body, true );
-			$json_error = json_last_error();
-			
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				if ( $json_error !== JSON_ERROR_NONE ) {
-					error_log( sprintf( 'AI Blog Posts: [make_request] JSON decode error: %d - %s', $json_error, json_last_error_msg() ) );
-					error_log( sprintf( 'AI Blog Posts: [make_request] Response body length: %d', strlen( $body ) ) );
-					error_log( sprintf( 'AI Blog Posts: [make_request] Response body (first 2000 chars): %s', substr( $body, 0, 2000 ) ) );
-					if ( strlen( $body ) > 2000 ) {
-						error_log( sprintf( 'AI Blog Posts: [make_request] Response body (last 500 chars): %s', substr( $body, -500 ) ) );
-					}
-				} else {
-					error_log( sprintf( 'AI Blog Posts: [make_request] JSON decoded successfully, data keys: %s', implode( ', ', array_keys( $data ?? array() ) ) ) );
-				}
-			}
+			$data = json_decode( $response_body, true );
 
 			$this->last_response = $data;
 			$last_http_code = $code;
-			$last_response_body = $body;
-
-			// Log response for debugging
-			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-				error_log( sprintf( 'AI Blog Posts: HTTP %d response from %s', $code, $endpoint ) );
-				if ( $code >= 400 ) {
-					error_log( 'AI Blog Posts: Error response - ' . substr( $body, 0, 500 ) );
-				}
-			}
-			
-			// If JSON decode failed, return error with more details
-			if ( $json_error !== JSON_ERROR_NONE ) {
-				// Check if response might be truncated (common issue with large responses)
-				$is_truncated = false;
-				if ( strlen( $body ) > 0 ) {
-					// Check if body ends abruptly (not with closing brace/bracket)
-					$trimmed = trim( $body );
-					$last_char = substr( $trimmed, -1 );
-					if ( ! in_array( $last_char, array( '}', ']', '"' ), true ) ) {
-						$is_truncated = true;
-					}
-				}
-				
-				$error_message = sprintf( 
-					__( 'Response could not be parsed. JSON error: %s', 'ai-blog-posts' ), 
-					json_last_error_msg() 
-				);
-				
-				if ( $is_truncated ) {
-					$error_message .= ' ' . __( 'Response appears to be truncated.', 'ai-blog-posts' );
-				}
-				
-				$last_error = new WP_Error(
-					'json_parse_error',
-					$error_message,
-					array( 
-						'http_code'    => $code, 
-						'body_length'  => strlen( $body ),
-						'body_preview' => substr( $body, 0, 1000 ),
-						'is_truncated' => $is_truncated,
-					)
-				);
-				
-				// For JSON parse errors, check if it's a timeout/truncation issue
-				// If the request took close to the timeout, it might be truncated
-				if ( $request_duration > ( $timeout * 0.9 ) && $attempts < self::MAX_RETRIES ) {
-					// Likely a timeout/truncation - retry with fresh request
-					if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-						error_log( sprintf( 'AI Blog Posts: [make_request] JSON parse error after %.1fs (close to timeout %ds) - retrying...', $request_duration, $timeout ) );
-					}
-					sleep( pow( 2, $attempts ) );
-					continue;
-				}
-				
-				// Don't retry other JSON parse errors - they're usually permanent (invalid format)
-				remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
-				return $last_error;
-			}
 
 			// Success
 			if ( $code >= 200 && $code < 300 ) {
-				// #region agent log
-				$this->debug_log('success', 'A,B,C,D,E', 'Request successful - returning data', array(
-					'http_code' => $code,
-					'data_keys' => is_array($data) ? array_keys($data) : 'not_array',
-					'has_choices' => isset($data['choices']),
-					'has_error' => isset($data['error']),
-				));
-				// #endregion
-				
-				// Remove cURL filter before returning
-				remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 				return $data;
 			}
 
@@ -1468,7 +1098,6 @@ class Ai_Blog_Posts_OpenAI {
 				$error_code = $data['error']['code'] ?? '';
 				
 				if ( 'insufficient_quota' === $error_code || 'insufficient_quota' === $error_type ) {
-					remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 					return new WP_Error(
 						'quota_exceeded',
 						__( 'Your OpenAI API quota has been exceeded. Please add credits to your OpenAI account at https://platform.openai.com/account/billing', 'ai-blog-posts' )
@@ -1500,33 +1129,17 @@ class Ai_Blog_Posts_OpenAI {
 			
 			// Check for specific error types
 			if ( 401 === $code ) {
-				remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 				return new WP_Error( 'invalid_api_key', __( 'Invalid API key. Please check your API key in Settings.', 'ai-blog-posts' ) );
 			}
 			if ( 403 === $code ) {
-				// Check if it's a GPT Image verification error
-				$error_message = $data['error']['message'] ?? '';
-				remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
-				if ( strpos( $error_message, 'organization must be verified' ) !== false || strpos( $error_message, 'gpt-image' ) !== false ) {
-					return new WP_Error( 
-						'organization_not_verified', 
-						__( 'GPT Image models require organization verification. Please verify your organization at https://platform.openai.com/settings/organization/general or try a different image model in Settings.', 'ai-blog-posts' ),
-						array( 'original_message' => $error_message )
-					);
-				}
 				return new WP_Error( 'access_denied', __( 'Access denied. Your API key may not have permission for this model.', 'ai-blog-posts' ) );
 			}
 			if ( 404 === $code ) {
-				remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 				return new WP_Error( 'model_not_found', __( 'The selected model was not found. Please choose a different model.', 'ai-blog-posts' ) );
 			}
 			
-			remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 			return new WP_Error( 'api_error', $error_message, array( 'status' => $code ) );
 		}
-
-		// Remove cURL filter now that requests are done
-		remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 
 		// All retries exhausted
 		if ( $last_error ) {
@@ -1535,11 +1148,8 @@ class Ai_Blog_Posts_OpenAI {
 			if ( strpos( $error_msg, 'cURL error 6' ) !== false ) {
 				return new WP_Error( 'connection_error', __( 'Cannot connect to OpenAI. Please check your internet connection or server DNS settings.', 'ai-blog-posts' ) );
 			}
-			if ( strpos( $error_msg, 'cURL error 28' ) !== false || 
-			     strpos( strtolower( $error_msg ), 'timed out' ) !== false ||
-			     strpos( strtolower( $error_msg ), 'timeout' ) !== false ) {
-				$timeout_message = __( 'Connection to OpenAI timed out. The servers may be busy or your server connection is slow. Please try again.', 'ai-blog-posts' );
-				return new WP_Error( 'timeout_error', $timeout_message );
+			if ( strpos( $error_msg, 'cURL error 28' ) !== false ) {
+				return new WP_Error( 'timeout_error', __( 'Connection to OpenAI timed out. The servers may be busy, please try again.', 'ai-blog-posts' ) );
 			}
 			if ( strpos( $error_msg, 'cURL error 7' ) !== false ) {
 				return new WP_Error( 'connection_refused', __( 'Connection to OpenAI was refused. Your server firewall may be blocking outbound HTTPS requests.', 'ai-blog-posts' ) );
