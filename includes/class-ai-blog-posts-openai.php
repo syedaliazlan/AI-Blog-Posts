@@ -207,6 +207,9 @@ class Ai_Blog_Posts_OpenAI {
 	/**
 	 * Verify the API key by making a test request.
 	 *
+	 * Uses a minimal chat completion request as per OpenAI API documentation.
+	 * This is more reliable than /models endpoint on some hosting environments.
+	 *
 	 * @since    1.0.0
 	 * @param    string $api_key    Optional API key to test.
 	 * @return   array              Result with 'success' and 'message' keys.
@@ -221,8 +224,20 @@ class Ai_Blog_Posts_OpenAI {
 			);
 		}
 
-		// Test with a minimal models list request
-		$response = $this->make_request( 'GET', '/models', array(), $key );
+		// Use a minimal chat completion request to verify the key
+		// This is more reliable than /models and produces a smaller response
+		$body = array(
+			'model'      => 'gpt-4o-mini', // Use cheapest model for verification
+			'messages'   => array(
+				array(
+					'role'    => 'user',
+					'content' => 'Hi',
+				),
+			),
+			'max_tokens' => 5, // Minimal tokens to save cost
+		);
+
+		$response = $this->make_request( 'POST', '/chat/completions', $body, $key );
 
 		if ( is_wp_error( $response ) ) {
 			return array(
@@ -231,20 +246,28 @@ class Ai_Blog_Posts_OpenAI {
 			);
 		}
 
-		if ( isset( $response['data'] ) ) {
+		// Check for successful response with choices
+		if ( isset( $response['choices'] ) && ! empty( $response['choices'] ) ) {
 			// Update verified status
 			Ai_Blog_Posts_Settings::set( 'api_verified', true );
 			
 			return array(
 				'success' => true,
 				'message' => __( 'API key verified successfully!', 'ai-blog-posts' ),
-				'models'  => $this->filter_relevant_models( $response['data'] ),
+			);
+		}
+
+		// Check for API error response
+		if ( isset( $response['error'] ) ) {
+			return array(
+				'success' => false,
+				'message' => $response['error']['message'] ?? __( 'Unknown API error.', 'ai-blog-posts' ),
 			);
 		}
 
 		return array(
 			'success' => false,
-			'message' => $response['error']['message'] ?? __( 'Unknown error occurred.', 'ai-blog-posts' ),
+			'message' => __( 'Unknown error occurred.', 'ai-blog-posts' ),
 		);
 	}
 
@@ -971,6 +994,11 @@ class Ai_Blog_Posts_OpenAI {
 		
 		// Ensure we get the full response
 		curl_setopt( $handle, CURLOPT_RETURNTRANSFER, true );
+		
+		// CRITICAL: Enable automatic decompression of gzip/deflate responses
+		// This fixes empty response body issues on Hostinger + Cloudflare setups
+		// Setting to empty string tells cURL to handle all supported encodings
+		curl_setopt( $handle, CURLOPT_ENCODING, '' );
 
 		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 			error_log( sprintf( 'AI Blog Posts: [cURL] Configured timeout=%ds, connect_timeout=30s for OpenAI request', $timeout ) );
