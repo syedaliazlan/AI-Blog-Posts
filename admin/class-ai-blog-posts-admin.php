@@ -1097,8 +1097,22 @@ class Ai_Blog_Posts_Admin {
 			// Resolve category by name or slug
 			$category_id = 0;
 			if ( ! empty( $category ) ) {
-				// First try to find by name (case-insensitive)
+				// Trim whitespace
+				$category = trim( $category );
+				
+				// First try to find by exact name
 				$cat = get_term_by( 'name', $category, 'category' );
+				
+				// If not found, try case-insensitive search
+				if ( ! $cat ) {
+					$all_cats = get_categories( array( 'hide_empty' => false ) );
+					foreach ( $all_cats as $existing_cat ) {
+						if ( strtolower( trim( $existing_cat->name ) ) === strtolower( $category ) ) {
+							$cat = $existing_cat;
+							break;
+						}
+					}
+				}
 				
 				// If not found by name, try by slug
 				if ( ! $cat ) {
