@@ -198,7 +198,7 @@ GPL-2.0 License - see [LICENSE.txt](LICENSE.txt)
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/syedaliazlan/AI-Blog-Posts/issues)
-- **Email**: contact@devonicweb.co.uk
+- **Email**: hello@aliazlan.net
 
 ---
 
