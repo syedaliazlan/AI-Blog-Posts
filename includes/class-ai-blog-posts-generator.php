@@ -308,12 +308,21 @@ class Ai_Blog_Posts_Generator {
 
 	private function step_seo( $job ) {
 		$this->log( 'Step 5: Setting SEO metadata...' );
+		
+		// Reset token tracking for this step
+		$this->token_usage = array(
+			'prompt_tokens'     => 0,
+			'completion_tokens' => 0,
+			'total_tokens'      => 0,
+			'cost_usd'          => 0,
+		);
+		
 		$this->set_seo_metadata( $job['post_id'], $job['topic'], $job['content'] );
 
-		// Log completion with tracked tokens from job
-		$prompt_tokens = $job['prompt_tokens'] ?? 0;
-		$completion_tokens = $job['completion_tokens'] ?? 0;
-		$cost_usd = $job['cost_usd'] ?? 0;
+		// Add SEO tokens to job totals
+		$prompt_tokens = ( $job['prompt_tokens'] ?? 0 ) + $this->token_usage['prompt_tokens'];
+		$completion_tokens = ( $job['completion_tokens'] ?? 0 ) + $this->token_usage['completion_tokens'];
+		$cost_usd = ( $job['cost_usd'] ?? 0 ) + $this->token_usage['cost_usd'];
 
 		// Debug log the token values
 		$this->log( sprintf( 'Token tracking - Prompt: %d, Completion: %d, Cost: $%.6f', $prompt_tokens, $completion_tokens, $cost_usd ) );
@@ -332,11 +341,14 @@ class Ai_Blog_Posts_Generator {
 		$this->log( sprintf( 'Generation complete! Post ID: %d, Cost: $%.4f, Log ID: %s', $job['post_id'], $cost_usd, $log_result ? $log_result : 'failed' ) );
 
 		return array(
-			'step'     => 'complete',
-			'progress' => 100,
-			'status'   => 'completed',
-			'edit_url' => get_edit_post_link( $job['post_id'], 'raw' ),
-			'view_url' => get_permalink( $job['post_id'] ),
+			'step'              => 'complete',
+			'progress'          => 100,
+			'status'            => 'completed',
+			'prompt_tokens'     => $prompt_tokens,
+			'completion_tokens' => $completion_tokens,
+			'cost_usd'          => $cost_usd,
+			'edit_url'          => get_edit_post_link( $job['post_id'], 'raw' ),
+			'view_url'          => get_permalink( $job['post_id'] ),
 		);
 	}
 
@@ -646,8 +658,20 @@ class Ai_Blog_Posts_Generator {
 			'post_author'  => get_current_user_id() ?: 1,
 		);
 
-		if ( ! empty( $options['category_id'] ) ) {
-			$post_data['post_category'] = array( (int) $options['category_id'] );
+		// Handle category assignment
+		$category_id = isset( $options['category_id'] ) ? (int) $options['category_id'] : 0;
+		
+		if ( $category_id > 0 ) {
+			// Verify the category exists
+			$category = get_term( $category_id, 'category' );
+			if ( $category && ! is_wp_error( $category ) ) {
+				$post_data['post_category'] = array( $category_id );
+				$this->log( sprintf( 'Assigning post to category ID %d (%s)', $category_id, $category->name ) );
+			} else {
+				$this->log( sprintf( 'Category ID %d not found, post will be uncategorized', $category_id ) );
+			}
+		} else {
+			$this->log( 'No category_id provided in options, post will be uncategorized' );
 		}
 
 		$post_id = wp_insert_post( $post_data, true );
@@ -839,6 +863,9 @@ class Ai_Blog_Posts_Generator {
 	/**
 	 * Set SEO metadata for post.
 	 *
+	 * Uses AI to generate optimized SEO title and meta description that follow
+	 * best practices for character length and keyword optimization.
+	 *
 	 * @since    1.0.0
 	 * @param    int    $post_id       Post ID.
 	 * @param    string $topic         Topic.
@@ -846,18 +873,27 @@ class Ai_Blog_Posts_Generator {
 	 */
 	private function set_seo_metadata( $post_id, $topic, $content_data ) {
 		$title = $content_data['title'] ?: $topic;
-		$excerpt = $content_data['excerpt'] ?: '';
 		$content = $content_data['content'] ?: '';
+		$keywords = $content_data['keywords'] ?? $topic;
 
-		// Generate meta description if not provided
-		if ( empty( $excerpt ) ) {
-			$excerpt = wp_trim_words( wp_strip_all_tags( $content ), 30 );
+		// Generate optimized SEO metadata using AI
+		$seo_data = $this->generate_optimized_seo( $title, $content, $keywords );
+		
+		if ( is_wp_error( $seo_data ) ) {
+			$this->log( 'SEO optimization failed: ' . $seo_data->get_error_message() . ' - using fallback' );
+			// Fallback to basic SEO
+			$seo_title = $title;
+			$meta_description = wp_trim_words( wp_strip_all_tags( $content ), 25 );
+		} else {
+			$seo_title = $seo_data['seo_title'] ?? $title;
+			$meta_description = $seo_data['meta_description'] ?? wp_trim_words( wp_strip_all_tags( $content ), 25 );
+			$this->log( sprintf( 'SEO optimized - Title: %d chars, Description: %d chars', strlen( $seo_title ), strlen( $meta_description ) ) );
 		}
 
-		// Apply to active SEO plugin using the correct method
+		// Apply to active SEO plugin
 		$this->seo->set_post_meta( $post_id, array(
-			'seo_title'        => $title,
-			'meta_description' => $excerpt,
+			'seo_title'        => $seo_title,
+			'meta_description' => $meta_description,
 			'focus_keyword'    => sanitize_text_field( $topic ),
 		) );
 
@@ -866,6 +902,76 @@ class Ai_Blog_Posts_Generator {
 		if ( ! empty( $tags ) ) {
 			wp_set_post_tags( $post_id, $tags, false );
 		}
+	}
+
+	/**
+	 * Generate optimized SEO title and meta description using AI.
+	 *
+	 * @since    1.0.0
+	 * @param    string $title     Post title.
+	 * @param    string $content   Post content.
+	 * @param    string $keywords  Focus keywords.
+	 * @return   array|WP_Error    SEO data or error.
+	 */
+	private function generate_optimized_seo( $title, $content, $keywords ) {
+		$model = Ai_Blog_Posts_Settings::get( 'model' );
+		
+		// Get first 1500 chars of content for context (enough for SEO but not too much)
+		$content_excerpt = wp_trim_words( wp_strip_all_tags( $content ), 200 );
+
+		$system_prompt = 'You are an SEO expert who creates optimized meta titles and descriptions that rank well in search engines.';
+		
+		$prompt = sprintf(
+			"Create an SEO-optimized title and meta description for this blog post.\n\n" .
+			"Original Title: %s\n" .
+			"Focus Keywords: %s\n" .
+			"Content Preview: %s\n\n" .
+			"STRICT REQUIREMENTS:\n" .
+			"1. SEO Title:\n" .
+			"   - MUST be 50-60 characters (this is critical for Google display)\n" .
+			"   - Include the primary keyword naturally\n" .
+			"   - Make it compelling and click-worthy\n" .
+			"   - Use power words if appropriate (e.g., Ultimate, Complete, Essential)\n" .
+			"   - Can include year or numbers if relevant\n\n" .
+			"2. Meta Description:\n" .
+			"   - MUST be 150-160 characters (this is critical for Google display)\n" .
+			"   - Include a clear value proposition\n" .
+			"   - Include the focus keyword naturally\n" .
+			"   - End with a subtle call-to-action or benefit\n" .
+			"   - Make it readable and engaging\n\n" .
+			"Return ONLY valid JSON:\n" .
+			'{"seo_title": "Your 50-60 char title", "meta_description": "Your 150-160 char description"}',
+			$title,
+			$keywords,
+			$content_excerpt
+		);
+
+		$result = $this->openai->generate_text( $prompt, $system_prompt, array(
+			'model'           => $model,
+			'max_tokens'      => 500,
+			'temperature'     => 0.7,
+			'response_format' => array( 'type' => 'json_object' ),
+		) );
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		// Track tokens
+		$this->add_token_usage( $result );
+
+		// Parse response
+		$response_content = $result['content'] ?? '';
+		$data = json_decode( $response_content, true );
+
+		if ( json_last_error() !== JSON_ERROR_NONE || empty( $data ) ) {
+			return new WP_Error( 'seo_parse_error', 'Failed to parse SEO response' );
+		}
+
+		return array(
+			'seo_title'        => $data['seo_title'] ?? $title,
+			'meta_description' => $data['meta_description'] ?? '',
+		);
 	}
 
 	/**
