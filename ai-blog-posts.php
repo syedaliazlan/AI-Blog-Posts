@@ -8,7 +8,7 @@
  * registers the activation and deactivation functions, and defines a function
  * that starts the plugin.
  *
- * @link              https://devonicweb.co.uk/
+ * @link              https://aliazlan.net/
  * @since             1.0.0
  * @package           Ai_Blog_Posts
  *
@@ -18,7 +18,7 @@
  * Description:       Automatically generate and publish high-quality, SEO-optimized blog posts using OpenAI's latest GPT-5 models. Features include GPT Image 1 generation, Yoast/RankMath/AIOSEO integration, scheduled posting, trending topics, CSV import, and comprehensive cost tracking.
  * Version:           1.2.0
  * Author:            Ali Azlan
- * Author URI:        https://devonicweb.co.uk/
+ * Author URI:        https://aliazlan.net/
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
  * Text Domain:       ai-blog-posts
