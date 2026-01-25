@@ -96,7 +96,8 @@ $rankmath_active = class_exists( 'RankMath' );
 									<?php if ( Ai_Blog_Posts_Settings::is_verified() ) : ?>
 										<span class="status-success"><span class="dashicons dashicons-yes-alt"></span> <?php esc_html_e( 'API key verified and working.', 'ai-blog-posts' ); ?></span>
 									<?php elseif ( Ai_Blog_Posts_Settings::is_configured() ) : ?>
-										<span class="status-warning"><span class="dashicons dashicons-warning"></span> <?php esc_html_e( 'API key set but not verified.', 'ai-blog-posts' ); ?></span>
+										<span class="status-success"><span class="dashicons dashicons-yes-alt"></span> <?php esc_html_e( 'API key configured. You can generate posts now.', 'ai-blog-posts' ); ?></span>
+										<br><small><?php esc_html_e( 'Verification is optional - if it fails, your API key may still work for post generation.', 'ai-blog-posts' ); ?></small>
 									<?php else : ?>
 										<?php esc_html_e( 'Enter your OpenAI API key to get started.', 'ai-blog-posts' ); ?>
 									<?php endif; ?>

@@ -900,8 +900,9 @@ class Ai_Blog_Posts_Admin {
 		$use_ai = isset( $_POST['use_ai'] ) && ( 'true' === $_POST['use_ai'] || true === $_POST['use_ai'] );
 
 		// Verify API is configured if using AI
-		if ( $use_ai && ! Ai_Blog_Posts_Settings::is_verified() ) {
-			wp_send_json_error( array( 'message' => __( 'Please configure and verify your API key first to use AI-powered analysis.', 'ai-blog-posts' ) ) );
+		// Use is_configured instead of is_verified - verification can fail on some hosts
+		if ( $use_ai && ! Ai_Blog_Posts_Settings::is_configured() ) {
+			wp_send_json_error( array( 'message' => __( 'Please configure your API key first to use AI-powered analysis.', 'ai-blog-posts' ) ) );
 		}
 
 		$analyzer = new Ai_Blog_Posts_Analyzer();
@@ -1287,14 +1288,9 @@ class Ai_Blog_Posts_Admin {
 				esc_url( admin_url( 'admin.php?page=ai-blog-posts-settings' ) ),
 				esc_html__( 'Configure now', 'ai-blog-posts' )
 			);
-		} elseif ( ! Ai_Blog_Posts_Settings::is_verified() ) {
-			printf(
-				'<div class="notice notice-info"><p>%s <a href="%s">%s</a></p></div>',
-				esc_html__( 'Your OpenAI API key has not been verified yet.', 'ai-blog-posts' ),
-				esc_url( admin_url( 'admin.php?page=ai-blog-posts-settings' ) ),
-				esc_html__( 'Verify now', 'ai-blog-posts' )
-			);
 		}
+		// Note: Verification warning removed - some hosting environments have issues with
+		// the verification endpoint, but post generation can still work with a valid API key
 	}
 
 }

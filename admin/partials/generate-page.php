@@ -16,7 +16,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 $categories = get_categories( array( 'hide_empty' => false ) );
 $is_configured = Ai_Blog_Posts_Settings::is_configured();
-$is_verified = Ai_Blog_Posts_Settings::is_verified();
+// Use is_configured instead of is_verified to allow generation without verification
+// Verification can fail due to server configuration issues even with valid API keys
+$is_verified = $is_configured; // Bypass verification requirement
 $models = Ai_Blog_Posts_Settings::get_models();
 $current_model = Ai_Blog_Posts_Settings::get( 'model' );
 

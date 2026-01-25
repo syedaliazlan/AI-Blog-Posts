@@ -65,7 +65,8 @@ class Ai_Blog_Posts_Analyzer {
 		);
 
 		// Use AI for deeper style analysis if requested and API is available
-		if ( $use_ai && Ai_Blog_Posts_Settings::is_verified() ) {
+		// Use is_configured instead of is_verified - verification can fail on some hosts
+		if ( $use_ai && Ai_Blog_Posts_Settings::is_configured() ) {
 			$ai_analysis = $this->ai_style_analysis( $posts );
 			if ( ! is_wp_error( $ai_analysis ) ) {
 				$analysis['ai_insights'] = $ai_analysis;

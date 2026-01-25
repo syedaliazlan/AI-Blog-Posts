@@ -124,6 +124,32 @@ class Ai_Blog_Posts_OpenAI {
 		// Load global call count from option (persists across requests)
 		self::$global_call_count = (int) get_option( 'ai_blog_posts_total_api_calls', 0 );
 	}
+
+	/**
+	 * Debug logging helper for instrumentation.
+	 *
+	 * @since    1.0.0
+	 * @param    string $location     Log location identifier.
+	 * @param    string $hypothesis   Hypothesis ID(s) this log tests.
+	 * @param    string $message      Log message.
+	 * @param    array  $data         Additional data to log.
+	 */
+	private function debug_log( $location, $hypothesis, $message, $data = array() ) {
+		$log_path = dirname( __DIR__ ) . '/.cursor/debug.log';
+		$log_dir = dirname( $log_path );
+		if ( ! is_dir( $log_dir ) ) {
+			@mkdir( $log_dir, 0755, true );
+		}
+		$entry = array(
+			'timestamp' => gmdate( 'c' ),
+			'location' => 'class-ai-blog-posts-openai.php:' . $location,
+			'hypothesisId' => $hypothesis,
+			'message' => $message,
+			'data' => $data,
+			'sessionId' => 'debug-session',
+		);
+		@file_put_contents( $log_path, wp_json_encode( $entry ) . "\n", FILE_APPEND | LOCK_EX );
+	}
 	
 	/**
 	 * Get the number of API calls made in this session.
@@ -982,6 +1008,15 @@ class Ai_Blog_Posts_OpenAI {
 			return;
 		}
 
+		// #region agent log
+		$this->debug_log('curl_callback_fired', 'A', 'cURL callback executed - WordPress IS using cURL', array(
+			'url' => $url,
+			'timeout' => $this->current_request_timeout,
+			'handle_type' => gettype($handle),
+			'curl_version' => function_exists('curl_version') ? curl_version()['version'] : 'unknown',
+		));
+		// #endregion
+
 		$timeout = $this->current_request_timeout;
 
 		// Set cURL timeout options explicitly
@@ -995,9 +1030,11 @@ class Ai_Blog_Posts_OpenAI {
 		// Ensure we get the full response
 		curl_setopt( $handle, CURLOPT_RETURNTRANSFER, true );
 		
-		// CRITICAL: Enable automatic decompression of gzip/deflate responses
-		// This fixes empty response body issues on Hostinger + Cloudflare setups
-		// Setting to empty string tells cURL to handle all supported encodings
+		// CRITICAL FIX: Request uncompressed responses to avoid decompression issues
+		// Some hosting environments (Hostinger + Cloudflare) don't properly decompress
+		// Setting to 'identity' tells the server to send uncompressed data
+		// Note: We set Accept-Encoding: identity in the request headers, and also
+		// set CURLOPT_ENCODING to empty string to ensure cURL handles any encoding
 		curl_setopt( $handle, CURLOPT_ENCODING, '' );
 
 		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -1018,6 +1055,15 @@ class Ai_Blog_Posts_OpenAI {
 	private function make_request( $method, $endpoint, $body = array(), $api_key = null ) {
 		$key = $api_key ?? $this->api_key;
 
+		// #region agent log
+		$this->debug_log('make_request_entry', 'A', 'Entering make_request', array(
+			'endpoint' => $endpoint,
+			'method' => $method,
+			'api_key_length' => strlen($key ?? ''),
+			'api_key_prefix' => substr($key ?? '', 0, 10) . '...',
+		));
+		// #endregion
+
 		if ( empty( $key ) ) {
 			return new WP_Error(
 				'missing_api_key',
@@ -1028,6 +1074,9 @@ class Ai_Blog_Posts_OpenAI {
 		$headers = array(
 			'Authorization' => 'Bearer ' . $key,
 			'Content-Type'  => 'application/json',
+			// Request identity encoding (no compression) to avoid decompression issues on some hosts
+			// Some Hostinger/Cloudflare setups don't properly decompress gzip responses
+			'Accept-Encoding' => 'identity',
 		);
 
 		if ( ! empty( $this->org_id ) ) {
@@ -1058,6 +1107,8 @@ class Ai_Blog_Posts_OpenAI {
 			'user-agent'  => 'WordPress/' . get_bloginfo( 'version' ) . '; ' . home_url(),
 			// Increase stream reading timeout for large responses
 			'stream'      => false,
+			// Force decompression of response
+			'decompress'  => true,
 		);
 
 		if ( ! empty( $body ) && 'GET' !== $method ) {
@@ -1065,6 +1116,16 @@ class Ai_Blog_Posts_OpenAI {
 		}
 
 		$url = self::API_BASE . $endpoint;
+
+		// #region agent log
+		$this->debug_log('request_config', 'A,B', 'Request configuration', array(
+			'url' => $url,
+			'timeout' => $timeout,
+			'headers_keys' => array_keys($headers),
+			'has_body' => !empty($body),
+			'decompress' => $args['decompress'],
+		));
+		// #endregion
 
 		// Retry logic
 		$attempts = 0;
@@ -1173,8 +1234,24 @@ class Ai_Blog_Posts_OpenAI {
 				error_log( sprintf( 'AI Blog Posts: API request completed in %.2f seconds', $request_duration ) );
 			}
 
+			// #region agent log
+			$this->debug_log('after_request', 'A,B,C,D,E', 'Response received from wp_remote_request', array(
+				'is_wp_error' => is_wp_error($response),
+				'response_type' => gettype($response),
+				'attempt' => $attempts,
+				'duration' => $request_duration,
+			));
+			// #endregion
+
 			if ( is_wp_error( $response ) ) {
 				$last_error = $response;
+				
+				// #region agent log
+				$this->debug_log('wp_error', 'D,E', 'WP_Error received', array(
+					'error_code' => $response->get_error_code(),
+					'error_message' => $response->get_error_message(),
+				));
+				// #endregion
 				
 				// Log the error
 				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
@@ -1198,7 +1275,62 @@ class Ai_Blog_Posts_OpenAI {
 			
 			// Check response headers for content length (using array access, not get() method)
 			$headers = wp_remote_retrieve_headers( $response );
-			$content_length = isset( $headers['content-length'] ) ? $headers['content-length'] : null;
+			// Handle both array and Requests_Utility_CaseInsensitiveDictionary objects
+			$headers_array = is_object( $headers ) ? $headers->getAll() : (array) $headers;
+			$content_length = isset( $headers_array['content-length'] ) ? $headers_array['content-length'] : null;
+			$content_encoding = isset( $headers_array['content-encoding'] ) ? $headers_array['content-encoding'] : 'none';
+			
+			// #region agent log
+			$this->debug_log('response_details', 'A,B,C', 'Response details extracted', array(
+				'http_code' => $code,
+				'body_length' => strlen($body),
+				'body_empty' => empty($body),
+				'content_length_header' => $content_length,
+				'content_encoding' => $content_encoding,
+				'headers_count' => count($headers_array),
+				'all_headers' => array_keys($headers_array),
+				'body_first_50_chars' => substr($body, 0, 50),
+				'body_is_binary' => !mb_check_encoding($body, 'UTF-8'),
+			));
+			// #endregion
+			
+			// CRITICAL FIX: Handle compressed responses that weren't decompressed
+			// This occurs on some Hostinger/Cloudflare setups where CURLOPT_ENCODING doesn't work
+			if ( empty( $body ) && $content_length && (int) $content_length > 0 ) {
+				// Try to get raw response body from the response array
+				$raw_body = isset( $response['body'] ) ? $response['body'] : '';
+				
+				// #region agent log
+				$this->debug_log('compression_fallback', 'B,C', 'Attempting compression fallback', array(
+					'raw_body_length' => strlen($raw_body),
+					'content_encoding' => $content_encoding,
+				));
+				// #endregion
+				
+				if ( ! empty( $raw_body ) ) {
+					// Try gzip decompression
+					if ( function_exists( 'gzdecode' ) ) {
+						$decoded = @gzdecode( $raw_body );
+						if ( $decoded !== false ) {
+							$body = $decoded;
+						}
+					}
+					// Try zlib decompression (deflate)
+					if ( empty( $body ) && function_exists( 'gzinflate' ) ) {
+						$decoded = @gzinflate( $raw_body );
+						if ( $decoded !== false ) {
+							$body = $decoded;
+						}
+					}
+					// Try raw inflate
+					if ( empty( $body ) && function_exists( 'gzuncompress' ) ) {
+						$decoded = @gzuncompress( $raw_body );
+						if ( $decoded !== false ) {
+							$body = $decoded;
+						}
+					}
+				}
+			}
 			
 			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
 				error_log( sprintf( 'AI Blog Posts: [make_request] HTTP %d response from %s', $code, $endpoint ) );
@@ -1214,6 +1346,15 @@ class Ai_Blog_Posts_OpenAI {
 			
 			// Check if body is empty
 			if ( empty( $body ) ) {
+				// #region agent log
+				$this->debug_log('empty_body_error', 'B,C', 'Empty response body - about to return error', array(
+					'http_code' => $code,
+					'attempt' => $attempts,
+					'will_retry' => $attempts < self::MAX_RETRIES,
+					'raw_response_keys' => is_array($response) ? array_keys($response) : 'not_array',
+				));
+				// #endregion
+				
 				$last_error = new WP_Error(
 					'empty_response',
 					__( 'Empty response body received from OpenAI API.', 'ai-blog-posts' ),
@@ -1306,6 +1447,15 @@ class Ai_Blog_Posts_OpenAI {
 
 			// Success
 			if ( $code >= 200 && $code < 300 ) {
+				// #region agent log
+				$this->debug_log('success', 'A,B,C,D,E', 'Request successful - returning data', array(
+					'http_code' => $code,
+					'data_keys' => is_array($data) ? array_keys($data) : 'not_array',
+					'has_choices' => isset($data['choices']),
+					'has_error' => isset($data['error']),
+				));
+				// #endregion
+				
 				// Remove cURL filter before returning
 				remove_action( 'http_api_curl', array( $this, 'configure_curl_for_openai' ), 10 );
 				return $data;
